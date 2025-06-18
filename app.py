@@ -2,111 +2,92 @@ import streamlit as st
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
-import io
 
-# Initialize OpenAI API key from Streamlit secrets
+# Load API key from secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("🩺 Medicaid Data NLP Analysis")
+st.set_page_config(page_title="Data Analyst GPT", layout="wide")
+st.title("📊 Smart CSV Data Analyzer")
+st.write("Upload any CSV and ask questions — choose a text response or a chart.")
 
-@st.cache_data(show_spinner=False)
-def load_csv(uploaded_file):
-    if uploaded_file is not None:
-        return pd.read_csv(uploaded_file)
-    return None
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
-def create_prompt(question, df):
-    prompt = (
-        f"You are a precise data analyst assistant.\n"
-        f"The dataset has {df.shape[0]} rows and {df.shape[1]} columns.\n"
-        f"Columns: {', '.join(df.columns)}.\n"
-        f"Answer the question below concisely and directly, no explanation unless asked:\n\n"
-        f"Question: {question}\n"
-        f"If you cannot answer based on the columns, say 'Sorry, that information is not available.'"
-    )
-    return prompt
-
-def ask_openai_chat(prompt):
-    response = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=300,
-    )
-    return response.choices[0].message.content.strip()
-
-def generate_chart(df, question):
-    # Simple heuristic chart generation based on question keywords
-    # You can improve this with better NLP or more logic
-    question = question.lower()
-    if "top" in question and ("drug" in question or "product" in question):
-        # For example: top drugs by reimbursed amount or prescriptions
-        if "reimbursed" in question and "amount" in question:
-            if "amount reimbursed" in df.columns and "drug name" in df.columns:
-                grouped = df.groupby("drug name")["amount reimbursed"].sum().sort_values(ascending=False).head(10)
-                fig, ax = plt.subplots()
-                grouped.plot(kind="bar", ax=ax)
-                ax.set_title("Top 10 Drugs by Amount Reimbursed")
-                ax.set_ylabel("Amount Reimbursed")
-                ax.set_xlabel("Drug Name")
-                plt.xticks(rotation=45, ha="right")
-                plt.tight_layout()
-                return fig
-        if "number of prescriptions" in question or "prescriptions" in question:
-            if "drug name" in df.columns and "number of prescriptions" in df.columns:
-                grouped = df.groupby("drug name")["number of prescriptions"].sum().sort_values(ascending=False).head(10)
-                fig, ax = plt.subplots()
-                grouped.plot(kind="bar", ax=ax)
-                ax.set_title("Top 10 Drugs by Number of Prescriptions")
-                ax.set_ylabel("Number of Prescriptions")
-                ax.set_xlabel("Drug Name")
-                plt.xticks(rotation=45, ha="right")
-                plt.tight_layout()
-                return fig
-
-    # Default fallback chart: show distribution of numeric columns count
-    numeric_cols = df.select_dtypes(include='number').columns.tolist()
-    if numeric_cols:
-        col = numeric_cols[0]
-        fig, ax = plt.subplots()
-        df[col].hist(ax=ax, bins=20)
-        ax.set_title(f"Histogram of {col}")
-        ax.set_xlabel(col)
-        ax.set_ylabel("Frequency")
-        plt.tight_layout()
-        return fig
-
-    return None
-
-# --- Streamlit UI ---
-
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+@st.cache_data
+def load_data(file):
+    return pd.read_csv(file)
 
 if uploaded_file:
-    df = load_csv(uploaded_file)
+    df = load_data(uploaded_file)
 
-    st.write(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns.")
+    # Preview
+    st.subheader("🔍 Data Preview (first 10 rows)")
+    st.dataframe(df.head(10), use_container_width=True)
 
-    question = st.text_input("Ask a question about your data:")
+    # User question
+    question = st.text_input("Ask a question about this data:")
 
-    if question:
-        col1, col2 = st.columns(2)
+    # Answer generator
+    def generate_answer(df: pd.DataFrame, question: str) -> str:
+        # Use schema summary, not sample rows (more reliable for full dataset)
+        col_info = "\n".join(
+            [f"- {col}: {str(dtype)}" for col, dtype in df.dtypes.items()]
+        )
+        stats = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
 
-        with col1:
-            if st.button("Get Text Answer"):
-                with st.spinner("Getting answer..."):
-                    prompt = create_prompt(question, df)
-                    answer = ask_openai_chat(prompt)
-                    st.markdown(f"**Answer:** {answer}")
+        prompt = f"""
+You are a data analyst. Given a dataset, answer questions clearly, concisely, and only using the data.
 
-        with col2:
-            if st.button("Get Chart"):
-                with st.spinner("Generating chart..."):
-                    fig = generate_chart(df, question)
-                    if fig:
-                        st.pyplot(fig)
-                    else:
-                        st.info("Sorry, I couldn't generate a chart for that question.")
+Dataset column summary:
+{col_info}
 
-else:
-    st.info("Please upload a CSV file to get started.")
+Basic stats:
+{stats}
+
+Now answer this question (just the answer, no code or reasoning):
+
+Question: {question}
+"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        return response.choices[0].message.content.strip()
+
+    # Button for text answer
+    if st.button("🧠 Text Answer") and question:
+        with st.spinner("Analyzing..."):
+            result = generate_answer(df, question)
+        st.markdown(f"**Answer:** {result}")
+
+    # Button for chart
+    if st.button("📈 Show Chart"):
+        st.subheader("Chart Builder")
+
+        # Automatically find usable columns
+        num_cols = df.select_dtypes(include='number').columns.tolist()
+        cat_cols = df.select_dtypes(include='object').columns.tolist()
+
+        if not num_cols or not cat_cols:
+            st.warning("Need at least one numeric and one categorical column.")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                cat_col = st.selectbox("Categorical Column", cat_cols)
+            with col2:
+                num_col = st.selectbox("Numeric Column", num_cols)
+
+            chart_data = (
+                df.groupby(cat_col)[num_col]
+                .sum()
+                .sort_values(ascending=False)
+                .head(10)
+            )
+
+            fig, ax = plt.subplots()
+            chart_data.plot(kind="bar", ax=ax, legend=False)
+            ax.set_ylabel(num_col)
+            ax.set_title(f"{num_col} by {cat_col}")
+            plt.xticks(rotation=45, ha="right")
+            st.pyplot(fig)
