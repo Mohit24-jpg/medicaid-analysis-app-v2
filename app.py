@@ -1,58 +1,61 @@
 import streamlit as st
 import pandas as pd
-from fuzzywuzzy import process
+import openai
 
-st.title("CSV Chatbot — Ask Questions About Your Data")
+# Load your OpenAI API key from Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+st.title("Medicaid Drug Dataset - GPT Query Assistant")
 
-def match_column(query_terms, columns):
-    # Returns best matching column in columns for any of the query_terms using fuzzy matching
-    for term in query_terms:
-        match, score = process.extractOne(term, columns)
-        if score > 70:  # Threshold can be tuned
-            return match
-    return None
+@st.cache_data
+def load_data():
+    return pd.read_csv("SDUD-2024.csv")
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    st.dataframe(df.head())
+df = load_data()
 
-    question = st.text_input("Ask a question about your data")
+st.write("Dataset preview:")
+st.dataframe(df.head())
 
-    if st.button("Get Answer") and question:
-        cols = df.columns.tolist()
+user_question = st.text_input("Ask a question about the dataset:")
 
-        # Example: detect keywords to columns
-        # This can be expanded or replaced with embedding similarity + LLM for better understanding
-        drug_col = match_column(["drug", "medication", "medicine", "name"], cols)
-        cost_col = match_column(["cost", "amount", "price", "reimbursed"], cols)
-        count_col = match_column(["count", "prescription", "units", "quantity"], cols)
+def ask_gpt(question, columns):
+    prompt = f"""
+You are a Python data analyst assistant. You have a pandas DataFrame named 'df' with columns: {', '.join(columns)}.
+Write Python pandas code to answer the user's question based on this DataFrame.
+Assign the final answer to a variable named 'result'.
 
-        # Simple intent detection examples:
-        question_lower = question.lower()
+User question: {question}
+
+Only output the Python code. No explanations.
+"""
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        max_tokens=250,
+        temperature=0,
+        stop=None,
+    )
+    return response.choices[0].text.strip()
+
+if user_question:
+    with st.spinner("Generating answer..."):
+        code = ask_gpt(user_question, df.columns.tolist())
+        st.code(code, language="python")
+
+        # Safe execution environment
+        local_env = {"df": df, "pd": pd}
 
         try:
-            if "top" in question_lower and "cost" in question_lower and drug_col and cost_col:
-                # Find top N drugs by cost
-                import re
-                n = int(re.search(r"top (\d+)", question_lower).group(1)) if re.search(r"top (\d+)", question_lower) else 3
-                result = df.groupby(drug_col)[cost_col].sum().sort_values(ascending=False).head(n)
-                st.write(f"Top {n} {drug_col} by total {cost_col}:")
-                st.table(result)
-
-            elif ("total" in question_lower or "sum" in question_lower) and cost_col:
-                total = df[cost_col].sum()
-                st.write(f"Total {cost_col}: {total}")
-
-            elif ("unique" in question_lower or "distinct" in question_lower) and drug_col:
-                unique_count = df[drug_col].nunique()
-                st.write(f"Number of unique {drug_col}: {unique_count}")
-
+            exec(code, {}, local_env)
+            if "result" in local_env:
+                st.write("Answer:")
+                res = local_env["result"]
+                # Show nicely if it's a DataFrame or Series
+                if isinstance(res, (pd.DataFrame, pd.Series)):
+                    st.dataframe(res)
+                else:
+                    st.write(res)
             else:
-                st.write("Sorry, I couldn't understand the question or find matching data columns.")
+                st.error("The code did not define a variable named 'result'.")
         except Exception as e:
-            st.error(f"Error processing your question: {e}")
-
-else:
-    st.info("Please upload a CSV file to start.")
+            st.error(f"Error executing code: {e}")
