@@ -2,112 +2,111 @@ import streamlit as st
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
+import io
 
-# Initialize OpenAI client with new SDK syntax
-client = openai.OpenAI()
+# Initialize OpenAI API key from Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("Natural Language CSV Data Analyzer")
+st.title("🩺 Medicaid Data NLP Analysis")
 
-# Upload CSV file
-uploaded_file = st.file_uploader("Upload any CSV file", type=["csv"])
+@st.cache_data(show_spinner=False)
+def load_csv(uploaded_file):
+    if uploaded_file is not None:
+        return pd.read_csv(uploaded_file)
+    return None
 
-if uploaded_file is not None:
-    # Load CSV into DataFrame
-    try:
-        df = pd.read_csv(uploaded_file)
-        st.write("### Sample Data")
-        st.dataframe(df.head())
-    except Exception as e:
-        st.error(f"Error loading CSV: {e}")
-        st.stop()
+def create_prompt(question, df):
+    prompt = (
+        f"You are a precise data analyst assistant.\n"
+        f"The dataset has {df.shape[0]} rows and {df.shape[1]} columns.\n"
+        f"Columns: {', '.join(df.columns)}.\n"
+        f"Answer the question below concisely and directly, no explanation unless asked:\n\n"
+        f"Question: {question}\n"
+        f"If you cannot answer based on the columns, say 'Sorry, that information is not available.'"
+    )
+    return prompt
 
-    question = st.text_input("Ask a question about your data")
+def ask_openai_chat(prompt):
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=300,
+    )
+    return response.choices[0].message.content.strip()
 
-    col1, col2 = st.columns(2)
+def generate_chart(df, question):
+    # Simple heuristic chart generation based on question keywords
+    # You can improve this with better NLP or more logic
+    question = question.lower()
+    if "top" in question and ("drug" in question or "product" in question):
+        # For example: top drugs by reimbursed amount or prescriptions
+        if "reimbursed" in question and "amount" in question:
+            if "amount reimbursed" in df.columns and "drug name" in df.columns:
+                grouped = df.groupby("drug name")["amount reimbursed"].sum().sort_values(ascending=False).head(10)
+                fig, ax = plt.subplots()
+                grouped.plot(kind="bar", ax=ax)
+                ax.set_title("Top 10 Drugs by Amount Reimbursed")
+                ax.set_ylabel("Amount Reimbursed")
+                ax.set_xlabel("Drug Name")
+                plt.xticks(rotation=45, ha="right")
+                plt.tight_layout()
+                return fig
+        if "number of prescriptions" in question or "prescriptions" in question:
+            if "drug name" in df.columns and "number of prescriptions" in df.columns:
+                grouped = df.groupby("drug name")["number of prescriptions"].sum().sort_values(ascending=False).head(10)
+                fig, ax = plt.subplots()
+                grouped.plot(kind="bar", ax=ax)
+                ax.set_title("Top 10 Drugs by Number of Prescriptions")
+                ax.set_ylabel("Number of Prescriptions")
+                ax.set_xlabel("Drug Name")
+                plt.xticks(rotation=45, ha="right")
+                plt.tight_layout()
+                return fig
 
-    with col1:
-        text_btn = st.button("Get Text Answer")
+    # Default fallback chart: show distribution of numeric columns count
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    if numeric_cols:
+        col = numeric_cols[0]
+        fig, ax = plt.subplots()
+        df[col].hist(ax=ax, bins=20)
+        ax.set_title(f"Histogram of {col}")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Frequency")
+        plt.tight_layout()
+        return fig
 
-    with col2:
-        chart_btn = st.button("Get Chart")
+    return None
 
-    def df_to_text_summary(df):
-        # Basic summary info for context
-        summary = f"Data has {df.shape[0]} rows and {df.shape[1]} columns. Columns are: {', '.join(df.columns)}."
-        return summary
+# --- Streamlit UI ---
 
-    def create_prompt(question, df):
-        # We give the model a summary of data columns and few sample rows, plus the question
-        sample_rows = df.head(5).to_csv(index=False)
-        prompt = (
-            f"You are a data analyst assistant.\n"
-            f"The dataset columns are: {', '.join(df.columns)}.\n"
-            f"Here are 5 sample rows:\n{sample_rows}\n\n"
-            f"Answer the question based on this data:\n{question}\n"
-            f"If you can't answer, say 'Sorry, I don't see that information in the data.'"
-        )
-        return prompt
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
-    def ask_openai_chat(prompt):
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant for data analysis."},
-            {"role": "user", "content": prompt},
-        ]
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0,
-        )
-        return response.choices[0].message.content.strip()
+if uploaded_file:
+    df = load_csv(uploaded_file)
 
-    if text_btn:
-        if not question.strip():
-            st.warning("Please enter a question first.")
-        else:
-            prompt = create_prompt(question, df)
-            with st.spinner("Getting answer from OpenAI..."):
-                answer = ask_openai_chat(prompt)
-            st.markdown("### Answer")
-            st.write(answer)
+    st.write(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns.")
 
-    if chart_btn:
-        if not question.strip():
-            st.warning("Please enter a question first.")
-        else:
-            # For charts, ask the model what columns to plot (expect a JSON with x and y columns)
-            prompt_chart = (
-                f"You are a data analyst assistant.\n"
-                f"Based on this dataset columns: {', '.join(df.columns)}\n"
-                f"Suggest the best columns to plot as x and y axis to answer this question:\n{question}\n"
-                f"Reply ONLY in JSON format like {{'x':'column_name', 'y':'column_name', 'kind':'bar' or 'line'}}\n"
-                f"If no good plot possible, reply with {{}}"
-            )
-            with st.spinner("Asking OpenAI for chart suggestion..."):
-                chart_resp = ask_openai_chat(prompt_chart)
+    question = st.text_input("Ask a question about your data:")
 
-            import json
-            try:
-                chart_info = json.loads(chart_resp.replace("'", '"'))
-            except Exception:
-                chart_info = {}
+    if question:
+        col1, col2 = st.columns(2)
 
-            if not chart_info:
-                st.info("Sorry, no suitable chart could be suggested.")
-            else:
-                x_col = chart_info.get("x")
-                y_col = chart_info.get("y")
-                kind = chart_info.get("kind", "bar")
+        with col1:
+            if st.button("Get Text Answer"):
+                with st.spinner("Getting answer..."):
+                    prompt = create_prompt(question, df)
+                    answer = ask_openai_chat(prompt)
+                    st.markdown(f"**Answer:** {answer}")
 
-                if x_col not in df.columns or y_col not in df.columns:
-                    st.error("Suggested columns not found in data.")
-                else:
-                    st.markdown(f"### Chart: {kind.title()} plot of {y_col} vs {x_col}")
-                    fig, ax = plt.subplots()
-                    if kind == "bar":
-                        df.plot(kind="bar", x=x_col, y=y_col, ax=ax)
-                    elif kind == "line":
-                        df.plot(kind="line", x=x_col, y=y_col, ax=ax)
+        with col2:
+            if st.button("Get Chart"):
+                with st.spinner("Generating chart..."):
+                    fig = generate_chart(df, question)
+                    if fig:
+                        st.pyplot(fig)
                     else:
-                        st.error(f"Unsupported chart kind: {kind}")
-                        st.stop()
-                    st.pyplot(fig)
+                        st.info("Sorry, I couldn't generate a chart for that question.")
+
+else:
+    st.info("Please upload a CSV file to get started.")

@@ -2,7 +2,8 @@ streamlit
 pandas
 openai
 matplotlib
+seaborn
 fuzzywuzzy
 python-Levenshtein
-openai
-seaborn
+scikit-learn
+
