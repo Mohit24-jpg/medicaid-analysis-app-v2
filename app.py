@@ -1,30 +1,31 @@
 import streamlit as st
 import pandas as pd
+import openai
 import matplotlib.pyplot as plt
-from openai import OpenAI
+import io
 
-# Initialize OpenAI client
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Initialize OpenAI API key from secrets.toml
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("NLP Data Analysis on Any CSV")
-
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
-
-def ask_openai_chat(messages, max_tokens=700, temp=0):
-    response = client.chat.completions.create(
+def ask_openai_chat(messages):
+    response = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=messages,
-        max_tokens=max_tokens,
-        temperature=temp,
+        temperature=0
     )
     return response.choices[0].message.content.strip()
 
-def generate_answer(df, question):
-    # Send the question + column names for context to OpenAI
+@st.cache_data(show_spinner=False)
+def load_data(uploaded_file):
+    return pd.read_csv(uploaded_file)
+
+def generate_text_answer(df, question):
     columns = df.columns.tolist()
-    system_msg = f"You are a helpful assistant analyzing a pandas DataFrame with columns: {columns}. "\
-                 "Answer the user question based on this data."
-    user_msg = f"Data columns: {columns}\nUser question: {question}"
+    system_msg = (
+        f"You are an expert data analyst. The data columns are: {columns}. "
+        "Answer the user question directly in clear, simple natural language, no code."
+    )
+    user_msg = f"Question: {question}"
     messages = [
         {"role": "system", "content": system_msg},
         {"role": "user", "content": user_msg}
@@ -32,51 +33,54 @@ def generate_answer(df, question):
     return ask_openai_chat(messages)
 
 def generate_chart_code(df, question):
-    # Ask OpenAI to generate matplotlib python code snippet to plot chart answering question
     columns = df.columns.tolist()
-    system_msg = f"You are a helpful assistant. Given a pandas DataFrame with columns: {columns}, "\
-                 "write python matplotlib code to plot a chart answering the user question. "\
-                 "Only return python code inside a code block. Do not include any explanations."
-    user_msg = f"Data columns: {columns}\nUser question: {question}"
+    system_msg = (
+        f"You are a Python expert who analyzes pandas DataFrames. Columns: {columns}. "
+        "Write Python matplotlib code (no imports, no print statements) "
+        "to produce a chart answering the user's question from this data. "
+        "Assume 'df' is the DataFrame. Return only the code snippet."
+    )
+    user_msg = f"Generate matplotlib code for: {question}"
     messages = [
         {"role": "system", "content": system_msg},
         {"role": "user", "content": user_msg}
     ]
-    code = ask_openai_chat(messages)
-    return code
+    return ask_openai_chat(messages)
 
+def run_chart_code(code):
+    # Run the matplotlib code safely in a limited namespace
+    local_vars = {"df": df, "plt": plt}
+    exec(code, {}, local_vars)
+    st.pyplot(plt.gcf())
+    plt.clf()
+
+st.title("🩺 Medicaid Drug Data NLP Explorer")
+
+uploaded_file = st.file_uploader("Upload a CSV file with your data", type=["csv"])
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    df = load_data(uploaded_file)
     st.write("Data preview:", df.head())
 
     question = st.text_input("Ask a question about your data")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Text Answer"):
-            if question.strip() == "":
-                st.warning("Please enter a question.")
-            else:
-                with st.spinner("Generating answer..."):
-                    answer = generate_answer(df, question)
-                    st.write("Answer:")
-                    st.write(answer)
+    if st.button("Text Answer"):
+        if question.strip():
+            with st.spinner("Getting answer..."):
+                answer = generate_text_answer(df, question)
+            st.markdown(f"**Answer:** {answer}")
+        else:
+            st.warning("Please enter a question.")
 
-    with col2:
-        if st.button("Chart"):
-            if question.strip() == "":
-                st.warning("Please enter a question.")
-            else:
-                with st.spinner("Generating chart..."):
-                    code = generate_chart_code(df, question)
-                    st.code(code, language="python")
-                    # Execute generated code safely
-                    try:
-                        # Define local environment with df and plt for exec
-                        local_env = {"df": df, "plt": plt}
-                        exec(code, {}, local_env)
-                        st.pyplot()
-                    except Exception as e:
-                        st.error(f"Failed to execute chart code: {e}")
+    if st.button("Chart"):
+        if question.strip():
+            with st.spinner("Generating chart..."):
+                code = generate_chart_code(df, question)
+                try:
+                    run_chart_code(code)
+                except Exception as e:
+                    st.error(f"Error running generated code: {e}")
+                    st.code(code)
+        else:
+            st.warning("Please enter a question.")
 else:
-    st.info("Please upload a CSV file to get started.")
+    st.info("Upload a CSV file to get started.")
