@@ -1,61 +1,61 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import openai
-import io
+import matplotlib.pyplot as plt
+import tempfile
 
-# Set your OpenAI API key from secrets
+# Load OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("📊 AI-Powered Data Analysis")
-st.write("Upload a CSV file and ask questions about your data using natural language.")
+st.title("📊 AI-Powered CSV Analysis App")
 
-# Upload CSV file
-uploaded_file = st.file_uploader("Upload your CSV", type=["csv"])
+uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
 
-# Load and cache data
-@st.cache_data(show_spinner=False)
-def load_data(uploaded_file):
-    return pd.read_csv(uploaded_file)
-
-df = None
 if uploaded_file:
-    try:
-        df = load_data(uploaded_file)
-        st.success("File uploaded successfully.")
-        st.dataframe(df.head(10))  # Preview
-    except Exception as e:
-        st.error(f"Error loading CSV: {e}")
+    # Load and cache the entire dataset
+    @st.cache_data
+    def load_data(file):
+        return pd.read_csv(file)
 
-# Input and buttons
-if df is not None:
-    question = st.text_input("Ask a question about your dataset:")
-    col1, col2 = st.columns([1, 1])
+    df = load_data(uploaded_file)
+    st.subheader("📄 Data Preview")
+    st.dataframe(df.head(10))
 
-    with col1:
-        text_btn = st.button("Text Answer")
+    question = st.text_input("Ask a question about this dataset:")
 
-    with col2:
-        chart_btn = st.button("Chart Answer")
+    col1, col2 = st.columns(2)
 
     def generate_text_answer(df: pd.DataFrame, question: str) -> str:
-        col_info = "\n".join([f"- {col}: {str(dtype)}" for col, dtype in df.dtypes.items()])
-        try:
-            stats = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
-        except TypeError:
-            stats = df.describe(include="all").fillna("").to_string()
+        # Use pandas to answer basic structured questions
+        if "top" in question and "reimbursed" in question:
+            cols = df.columns.str.lower()
+            prod_col = next((col for col in df.columns if "product" in col.lower()), None)
+            cost_col = next((col for col in df.columns if "reimbursed" in col.lower()), None)
 
+            if prod_col and cost_col:
+                top_items = (
+                    df.groupby(prod_col)[cost_col]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(3)
+                    .reset_index()
+                )
+                formatted = "\n".join(
+                    f"{row[prod_col]} — ${row[cost_col]:,.2f}"
+                    for _, row in top_items.iterrows()
+                )
+                return f"Top 3 most reimbursed products:\n{formatted}"
+
+        # Otherwise fallback to GPT on sample
+        sample = df.head(300).to_csv(index=False)
         prompt = f"""
-You are a data analyst. Answer concisely and directly using the dataset below.
+The user uploaded this dataset (first 300 rows shown):
 
-Dataset columns:
-{col_info}
+{sample}
 
-Summary statistics:
-{stats}
+Answer this question directly and concisely:
 
-Answer this question briefly, no explanation unless asked:
-Question: {question}
+{question}
 """
         response = openai.chat.completions.create(
             model="gpt-4o",
@@ -65,50 +65,47 @@ Question: {question}
         return response.choices[0].message.content.strip()
 
     def generate_chart(df: pd.DataFrame, question: str):
-        sample_csv = df.head(200).to_csv(index=False)
+        sample = df.head(300).to_csv(index=False)
         prompt = f"""
-You are a Python data analyst. The user has uploaded a dataset and wants to generate a chart. 
-They asked: "{question}"
+Given this CSV sample (first 300 rows):
 
-Generate a single Python matplotlib or pandas plot using the dataframe called df.
-Only return the Python code between triple backticks. Don't include explanations or text.
+{sample}
 
-Here is a sample of the data (CSV format):
-{sample_csv}
+Generate Python matplotlib code to answer the question: "{question}".
+Only include the code. Do not print explanation or use plt.show().
+Assume necessary libraries are already imported.
 """
-
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
+
         code = response.choices[0].message.content
-        import re
-        match = re.search(r"```(?:python)?\s*(.*?)```", code, re.DOTALL)
-        code = match.group(1) if match else code
 
-        # Execute code safely
         try:
-            exec_globals = {"df": df, "plt": plt}
-            exec(code, exec_globals)
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".py") as temp_py:
+                temp_py.write("import matplotlib.pyplot as plt\n")
+                temp_py.write("import pandas as pd\n")
+                temp_py.write("from io import StringIO\n")
+                temp_py.write(f"df = pd.read_csv(StringIO('''{sample}'''))\n")
+                temp_py.write(code + "\nplt.tight_layout()\n")
+                temp_path = temp_py.name
+
+            exec_globals = {}
+            with open(temp_path) as f:
+                code_contents = f.read()
+                exec(code_contents, exec_globals)
+
             st.pyplot(plt)
-            plt.clf()
+
         except Exception as e:
-            st.error(f"Failed to render chart: {e}")
-            st.code(code)
+            st.error(f"Chart generation failed: {e}")
 
-    if text_btn and question:
-        with st.spinner("Generating answer..."):
-            try:
-                answer = generate_text_answer(df, question)
-                st.success("Answer:")
-                st.write(answer)
-            except Exception as e:
-                st.error(f"OpenAI API error: {e}")
+    if question:
+        if col1.button("Get Text Answer"):
+            answer = generate_text_answer(df, question)
+            st.markdown(f"**Answer:** {answer}")
 
-    if chart_btn and question:
-        with st.spinner("Generating chart..."):
-            try:
-                generate_chart(df, question)
-            except Exception as e:
-                st.error(f"OpenAI chart generation failed: {e}")
+        if col2.button("Get Chart"):
+            generate_chart(df, question)
