@@ -1,0 +1,6 @@
+streamlit
+pandas
+openai
+matplotlib
+fuzzywuzzy
+python-Levenshtein
