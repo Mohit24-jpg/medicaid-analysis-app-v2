@@ -4,51 +4,36 @@ import openai
 import matplotlib.pyplot as plt
 from fuzzywuzzy import process
 
-# Set your OpenAI API key from Streamlit secrets
+# Set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.set_page_config(page_title="Medicaid Drug NLP", layout="wide")
-st.title("💊 Medicaid Drug Spending NLP Analytics")
+st.title("Medicaid Drug Spending NLP Analytics")
 
-uploaded_file = st.file_uploader("Upload your Medicaid CSV file", type="csv")
+# File uploader and inputs
+uploaded_file = st.file_uploader("Upload your Medicaid CSV file", type=["csv"])
+
+if uploaded_file is None:
+    st.info("Please upload a CSV file to proceed.")
+    st.stop()
 
 @st.cache_data
 def load_data(file):
-    return pd.read_csv(file)
-
-if uploaded_file is None:
-    st.warning("Please upload a CSV file to begin.")
-    st.stop()
+    try:
+        df = pd.read_csv(file)
+        return df
+    except Exception as e:
+        st.error(f"Error loading CSV: {e}")
+        return None
 
 df = load_data(uploaded_file)
+if df is None:
+    st.stop()
 
-# Show preview
-st.subheader("🔍 Data Preview")
-st.dataframe(df.head(10), use_container_width=True)
+st.subheader("Data preview (first 10 rows)")
+st.dataframe(df.head(10))
 
-# Fuzzy match to correct column names
-def match_column(user_input, df_columns):
-    match, score = process.extractOne(user_input, df_columns)
-    return match if score > 70 else None
-
-# Function to generate answer using OpenAI
-def generate_text_answer(df, question):
-    summary = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
-    columns = ", ".join(df.columns.tolist())
-    messages = [
-        {"role": "system", "content": "You are a helpful data analyst."},
-        {
-            "role": "user",
-            "content": f"""Here is a summary of the dataset:
-{summary}
-
-Columns available: {columns}
-
-Answer the question concisely and directly, without showing any code or suggesting external tools:
-{question}
-""",
-        },
-    ]
+# Helper: OpenAI chat completion call
+def ask_openai_chat(messages):
     response = openai.chat.completions.create(
         model="gpt-4o",
         messages=messages,
@@ -56,39 +41,80 @@ Answer the question concisely and directly, without showing any code or suggesti
     )
     return response.choices[0].message.content.strip()
 
-# Function to generate chart using GPT-suggested logic
+def find_best_column(question, columns):
+    # Use fuzzy matching to find best matching column names in the dataset
+    matches = []
+    for col in columns:
+        score = process.extractOne(question, [col])[1]
+        matches.append((col, score))
+    matches.sort(key=lambda x: x[1], reverse=True)
+    best_cols = [col for col, score in matches if score > 50]  # threshold
+    return best_cols if best_cols else columns[:3]  # fallback to first 3 columns
+
+# Generate text answer from the full dataframe
+def generate_text_answer(df, question):
+    # Summary without datetime_is_numeric (fix for older pandas)
+    summary = df.describe(include="all").fillna("").to_string()
+    columns = df.columns.tolist()
+    best_cols = find_best_column(question, columns)
+    columns_str = ", ".join(best_cols)
+
+    messages = [
+        {"role": "system", "content": "You are a helpful data analyst."},
+        {
+            "role": "user",
+            "content": (
+                f"Here is a summary of the dataset:\n{summary}\n\n"
+                f"Columns relevant to the question: {columns_str}\n\n"
+                f"Answer the question concisely and directly: {question}"
+            ),
+        },
+    ]
+
+    return ask_openai_chat(messages)
+
+# Generate chart (bar chart of top 5 by a numeric column guessed)
 def generate_chart(df, question):
-    # Match key columns
-    group_col = match_column("product name", df.columns)
-    value_col = match_column("total amount reimbursed", df.columns)
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    if not numeric_cols:
+        st.error("No numeric columns found to create chart.")
+        return
+    best_cols = find_best_column(question, numeric_cols)
+    col = best_cols[0]
 
-    if group_col and value_col:
-        chart_data = df.groupby(group_col)[value_col].sum().sort_values(ascending=False).head(5)
-        fig, ax = plt.subplots(figsize=(8, 4))
-        chart_data.plot(kind="bar", ax=ax, color="skyblue")
-        ax.set_title(f"Top 5 {group_col} by {value_col}", fontsize=14)
-        ax.set_ylabel(value_col)
-        ax.set_xlabel(group_col)
-        st.pyplot(fig)
-    else:
-        st.error("Could not find appropriate columns to build a chart.")
+    # Group by product name or first string column, sum numeric col, get top 5
+    group_col_candidates = df.select_dtypes(include='object').columns.tolist()
+    group_col = "Product Name" if "Product Name" in group_col_candidates else group_col_candidates[0]
 
-# User input
-st.subheader("❓ Ask a Question")
-question = st.text_input("Type a question about the dataset:")
+    top5 = df.groupby(group_col)[col].sum().sort_values(ascending=False).head(5)
+
+    fig, ax = plt.subplots(figsize=(6, 4))  # smaller figure size
+    top5.plot(kind='bar', ax=ax)
+    ax.set_title(f"Top 5 {group_col} by {col}")
+    ax.set_ylabel(col)
+    ax.set_xlabel(group_col)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+
+    st.pyplot(fig)
+
+st.subheader("Ask a question about the dataset")
+
+question = st.text_input("Enter your question here:")
 
 col1, col2 = st.columns(2)
+
 with col1:
-    if st.button("💬 Get Text Answer"):
+    if st.button("Get Text Answer"):
         if not question.strip():
             st.warning("Please enter a question.")
         else:
-            with st.spinner("Asking OpenAI..."):
+            with st.spinner("Generating answer..."):
                 answer = generate_text_answer(df, question)
                 st.markdown(f"**Answer:** {answer}")
 
 with col2:
-    if st.button("📊 Generate Chart"):
+    if st.button("Create Chart"):
         if not question.strip():
             st.warning("Please enter a question for the chart.")
         else:
