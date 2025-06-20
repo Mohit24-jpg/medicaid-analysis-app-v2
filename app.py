@@ -1,52 +1,74 @@
 import streamlit as st
 import pandas as pd
 import openai
-import matplotlib.pyplot as plt
 import requests
-import io
 
+# Set OpenAI API key from secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("Medicaid Drug Spending NLP Analytics")
+st.set_page_config(page_title="Medicaid Drug Spending NLP", layout="wide")
+st.title("💊 Medicaid Drug Spending NLP Analytics")
 
-with st.sidebar:
-    st.header("Filters")
-    state = st.selectbox("Select state abbreviation", ["OH", "NY", "CA", "TX", "FL"], index=0)
-    year = st.selectbox("Select year", ["2020", "2021", "2022", "2023", "2024"], index=4)
-
-if not (state and year):
-    st.info("Please select state and year to proceed.")
-    st.stop()
-
-# Load Medicaid API data
-data_url = f"https://data.medicaid.gov/api/views/61729e5a-7aa8-448c-8903-ba3e0cd0ea3c/rows.csv?accessType=DOWNLOAD&bom=true&format=true&delimiter=%2C"
-
+# Load Medicaid JSON API
 @st.cache_data
-
 def load_data():
-    response = requests.get(data_url)
-    if response.status_code == 200:
-        df = pd.read_csv(io.StringIO(response.text))
-        return df
-    else:
-        st.error("Failed to load Medicaid data from API.")
+    url = "https://data.medicaid.gov/resource/61729e5a-7aa8-448c-8903-ba3e0cd0ea3c.json?$limit=50000"
+    response = requests.get(url)
+    if response.status_code != 200:
+        st.error("Failed to load data from Medicaid API.")
         return None
+    return pd.DataFrame(response.json())
 
+# Load data
 df = load_data()
 if df is None:
     st.stop()
 
-# Filter data
-filtered_df = df[(df['state'] == state.upper()) & (df['year'] == int(year))]
-if filtered_df.empty:
-    st.warning("No data found for the selected filters.")
-    st.stop()
+# Normalize column names
+df.columns = [col.lower().replace(" ", "_") for col in df.columns]
 
-st.subheader(f"Data preview: {state.upper()} {year}")
+# Clean and convert numeric columns
+for col in ['total_amount_reimbursed', 'number_of_prescriptions', 'units_reimbursed']:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+# Sidebar filters
+with st.sidebar:
+    st.header("📌 Filter Data")
+    states = sorted(df['state'].dropna().unique())
+    selected_state = st.selectbox("Select State", states)
+
+    years = sorted(df['year'].dropna().unique())
+    selected_year = st.selectbox("Select Year", years)
+
+    st.markdown("---")
+    st.markdown("🔍 Ask a question in natural language about the filtered data.")
+
+# Filter dataset
+filtered_df = df[(df['state'] == selected_state) & (df['year'] == selected_year)]
+
+st.subheader(f"📄 Preview: {selected_state} - {selected_year}")
 st.dataframe(filtered_df.head(10))
 
-# GPT Interface
-def ask_openai(messages):
+# GPT-based question answering
+def ask_gpt(question, df):
+    # Create a summary of the dataset
+    summary = df.describe(include='all', datetime_is_numeric=True).fillna("").to_string()
+    columns = ", ".join(df.columns.tolist())
+
+    messages = [
+        {"role": "system", "content": "You are a helpful data analyst assistant. Be concise and only output the answer."},
+        {
+            "role": "user",
+            "content": (
+                f"Here is a summary of the Medicaid dataset:\n\n"
+                f"{summary}\n\n"
+                f"Columns available: {columns}\n\n"
+                f"Answer the following question: {question}"
+            )
+        }
+    ]
+
     response = openai.chat.completions.create(
         model="gpt-4o",
         messages=messages,
@@ -54,54 +76,16 @@ def ask_openai(messages):
     )
     return response.choices[0].message.content.strip()
 
-def generate_text_answer(df, question):
-    sample_data = df.sample(n=min(100, len(df))).to_dict(orient="records")
-    messages = [
-        {"role": "system", "content": "You are a data analyst. Answer only based on the data provided."},
-        {"role": "user", "content": f"The dataset has the following columns:\n{', '.join(df.columns)}"},
-        {"role": "user", "content": f"Here is a sample of the dataset:\n{sample_data}"},
-        {"role": "user", "content": f"Answer concisely: {question}"}
-    ]
-    return ask_openai(messages)
+# Question input
+st.subheader("💬 Ask Your Question")
+question = st.text_input("Example: What are the top 3 most prescribed drugs by total amount reimbursed?")
 
-def generate_chart(df, question):
-    sample_data = df.sample(n=min(100, len(df))).to_dict(orient="records")
-    messages = [
-        {"role": "system", "content": "You're a Python data visualization assistant. Use matplotlib and pandas. Don't explain, only give code."},
-        {"role": "user", "content": f"Sample data:\n{sample_data}"},
-        {"role": "user", "content": f"Write Python code to create a chart answering: {question}"}
-    ]
-
-    code = ask_openai(messages)
-
-    try:
-        local_vars = {"df": df, "plt": plt}
-        exec(code, {}, local_vars)
-        fig = plt.gcf()
-        st.pyplot(fig)
-    except Exception as e:
-        st.error(f"Failed to create chart: {e}")
-        st.code(code)
-
-# Question Input and Buttons
-st.subheader("Ask a question about the filtered dataset")
-question = st.text_input("Enter your question")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("Get Text Answer"):
-        if question:
-            with st.spinner("Analyzing..."):
-                answer = generate_text_answer(filtered_df, question)
-                st.markdown(f"**Answer:** {answer}")
-        else:
-            st.warning("Enter a question first.")
-
-with col2:
-    if st.button("Create Chart"):
-        if question:
-            with st.spinner("Generating chart..."):
-                generate_chart(filtered_df, question)
-        else:
-            st.warning("Enter a question to generate a chart.")
+if st.button("Get Answer"):
+    if question.strip() == "":
+        st.warning("Please enter a question.")
+    elif filtered_df.empty:
+        st.warning("No data for the selected filters.")
+    else:
+        with st.spinner("Thinking..."):
+            answer = ask_gpt(question, filtered_df)
+            st.markdown(f"**Answer:** {answer}")
