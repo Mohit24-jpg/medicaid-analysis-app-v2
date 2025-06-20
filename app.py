@@ -1,94 +1,43 @@
 import streamlit as st
-import requests
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
 import io
-import base64
 
-# ========== CONFIG ==========
-
+# Set OpenAI API key from secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-API_BASE = "https://data.cms.gov/resource/srj6-uykx.json"  # Medicaid Drug Spending API endpoint
+st.title("Medicaid Drug Spending NLP Analytics")
 
-# ========== FUNCTIONS ==========
+with st.sidebar:
+    st.header("Filters & Data Upload")
+    state = st.text_input("Enter state abbreviation (e.g. OH)", max_chars=2)
+    year = st.text_input("Enter year (e.g. 2024)", max_chars=4)
+    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
-@st.cache_data(show_spinner=False)
-def load_medicaid_data(state: str, year: str) -> pd.DataFrame:
-    """
-    Load Medicaid drug spending data from CMS API filtered by state and year.
-    Fetches all pages via pagination.
-    """
-    state = state.upper()
-    limit = 1000
-    offset = 0
-    all_rows = []
+if not (state and year and uploaded_file):
+    st.info("Please enter state abbreviation, year, and upload a CSV file to proceed.")
+    st.stop()
 
-    while True:
-        params = {
-            "$limit": limit,
-            "$offset": offset,
-            "state": state,
-            "year": year
-        }
-        response = requests.get(API_BASE, params=params)
-        response.raise_for_status()
-        rows = response.json()
-        if not rows:
-            break
-        all_rows.extend(rows)
-        offset += limit
+# Load CSV from upload
+@st.cache_data
+def load_data(uploaded_file):
+    try:
+        df = pd.read_csv(uploaded_file)
+        return df
+    except Exception as e:
+        st.error(f"Error loading CSV: {e}")
+        return None
 
-    if len(all_rows) == 0:
-        return pd.DataFrame()  # empty
+df = load_data(uploaded_file)
+if df is None:
+    st.stop()
 
-    df = pd.DataFrame(all_rows)
+st.subheader(f"Data preview: {state.upper()} {year}")
+st.dataframe(df.head(10))
 
-    # Convert numeric columns as needed
-    for col in ["total_amount_reimbursed", "number_of_prescriptions"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    return df
-
-def summarize_data(df: pd.DataFrame) -> str:
-    """
-    Create a concise summary of the dataset for GPT context.
-    """
-    if df.empty:
-        return "The dataset is empty."
-
-    num_rows = len(df)
-    columns = list(df.columns)
-    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    text = f"The dataset has {num_rows} rows and the following columns: {', '.join(columns)}.\n"
-    text += f"Numeric columns include: {', '.join(numeric_cols)}.\n"
-
-    # Add some simple stats
-    for col in numeric_cols:
-        col_sum = df[col].sum()
-        col_mean = df[col].mean()
-        text += f"Sum of {col} is {col_sum:,.2f}, average is {col_mean:,.2f}.\n"
-
-    # Mention top 3 products by total amount reimbursed if column exists
-    if "total_amount_reimbursed" in df.columns and "product_name" in df.columns:
-        top3 = (
-            df.groupby("product_name")["total_amount_reimbursed"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(3)
-        )
-        text += "Top 3 products by total amount reimbursed are:\n"
-        for prod, amt in top3.items():
-            text += f"- {prod}: ${amt:,.2f}\n"
-
-    return text
-
+# Helper: call OpenAI ChatCompletion with conversation
 def ask_openai_chat(messages):
-    """
-    Query OpenAI chat completion with messages.
-    """
     response = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
@@ -96,101 +45,59 @@ def ask_openai_chat(messages):
     )
     return response.choices[0].message.content.strip()
 
-def generate_text_answer(df: pd.DataFrame, question: str) -> str:
-    """
-    Generate a text answer by sending data summary + question to GPT.
-    """
-    summary = summarize_data(df)
-    prompt = f"Dataset summary:\n{summary}\n\nQuestion: {question}\nAnswer concisely:"
-    messages = [{"role": "user", "content": prompt}]
+# Generate answer (text) by sending question + CSV summary
+def generate_text_answer(df, question):
+    # Provide summary and column list
+    summary = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
+    columns = ", ".join(df.columns.tolist())
+    messages = [
+        {"role": "system", "content": "You are a helpful data analyst assistant."},
+        {
+            "role": "user",
+            "content": (
+                f"Here is a summary of the dataset:\n{summary}\n"
+                f"Columns available: {columns}\n"
+                f"Answer the question concisely: {question}"
+            ),
+        },
+    ]
     return ask_openai_chat(messages)
 
-def generate_chart(df: pd.DataFrame, question: str):
-    """
-    Generate a chart based on GPT instructions.
-    GPT should respond with JSON specifying chart type and data columns.
-    """
-    summary = summarize_data(df)
-    prompt = (
-        f"Dataset summary:\n{summary}\n\n"
-        "Based on this data, generate JSON instructions for a matplotlib chart "
-        f"to answer this question: {question}\n"
-        "JSON format example: {\"chart\": \"bar\", \"x\": \"product_name\", \"y\": \"total_amount_reimbursed\", \"top_n\": 5}"
-    )
-    messages = [{"role": "user", "content": prompt}]
-    json_resp = ask_openai_chat(messages)
-
-    import json
-    try:
-        instr = json.loads(json_resp)
-    except Exception:
-        st.error("Failed to parse chart instructions from GPT.")
-        st.write("GPT response:", json_resp)
+# Generate chart (bar chart example)
+def generate_chart(df, question):
+    # Let GPT suggest columns and chart type, here simplified
+    # For demo, just show top 5 by a numeric column named vaguely "amount"
+    # In production, use GPT to parse question and suggest chart type & columns
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    if not numeric_cols:
+        st.error("No numeric columns found to create chart.")
         return
-
-    chart_type = instr.get("chart")
-    x_col = instr.get("x")
-    y_col = instr.get("y")
-    top_n = instr.get("top_n", 5)
-
-    if x_col not in df.columns or y_col not in df.columns:
-        st.error(f"Columns {x_col} or {y_col} not found in data.")
-        return
-
-    df_plot = df.groupby(x_col)[y_col].sum().sort_values(ascending=False).head(top_n)
-
+    col = numeric_cols[0]
+    top5 = df.groupby(df.columns[0])[col].sum().sort_values(ascending=False).head(5)
     fig, ax = plt.subplots()
-    if chart_type == "bar":
-        df_plot.plot(kind="bar", ax=ax)
-        ax.set_ylabel(y_col.replace("_", " ").title())
-        ax.set_xlabel(x_col.replace("_", " ").title())
-        ax.set_title(f"Top {top_n} {x_col.replace('_', ' ').title()} by {y_col.replace('_', ' ').title()}")
-    else:
-        st.error(f"Unsupported chart type: {chart_type}")
-        return
-
+    top5.plot(kind='bar', ax=ax)
+    ax.set_title(f"Top 5 {df.columns[0]} by {col}")
+    ax.set_ylabel(col)
     st.pyplot(fig)
 
-# ========== STREAMLIT UI ==========
+st.subheader("Ask a question about the dataset")
+question = st.text_input("Enter your question here")
 
-st.title("Medicaid Drug Spending NLP Analytics")
+col1, col2 = st.columns(2)
 
-with st.sidebar:
-    st.header("Data filters")
-    state = st.text_input("Enter state abbreviation (e.g. OH)", max_chars=2)
-    year = st.text_input("Enter year (e.g. 2024)", max_chars=4)
-
-uploaded_file = None
-if state and year:
-    with st.spinner("Loading Medicaid data..."):
-        df = load_medicaid_data(state, year)
-        if df.empty:
-            st.error("No data found for given state and year.")
+with col1:
+    if st.button("Get Text Answer"):
+        if question.strip() == "":
+            st.warning("Please enter a question.")
         else:
-            st.write(f"Preview of data for {state}, {year}:")
-            st.dataframe(df.head())
+            with st.spinner("Generating answer..."):
+                answer = generate_text_answer(df, question)
+                st.markdown(f"**Answer:** {answer}")
 
-            question = st.text_input("Ask a question about the dataset:")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                if st.button("Get Answer (Text)"):
-                    if not question.strip():
-                        st.warning("Please enter a question.")
-                    else:
-                        with st.spinner("Getting answer from OpenAI..."):
-                            answer = generate_text_answer(df, question)
-                            st.markdown("**Answer:**")
-                            st.write(answer)
-
-            with col2:
-                if st.button("Create Chart"):
-                    if not question.strip():
-                        st.warning("Please enter a question to generate a chart.")
-                    else:
-                        with st.spinner("Generating chart from OpenAI..."):
-                            generate_chart(df, question)
-else:
-    st.info("Please enter state abbreviation and year to load data.")
-
+with col2:
+    if st.button("Create Chart"):
+        if question.strip() == "":
+            st.warning("Please enter a question for the chart.")
+        else:
+            with st.spinner("Creating chart..."):
+                generate_chart(df, question)
