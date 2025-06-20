@@ -46,17 +46,23 @@ def match_column(user_input, column_names):
     match, score = process.extractOne(user_input.lower(), column_names)
     return match if score > 70 else None
 
-# OpenAI text reasoning
+# OpenAI text reasoning (with actual summary stats from full dataset)
 def ask_openai(question, df):
-    columns = df.columns.tolist()
-    sample = df.sample(min(len(df), 20))  # limit for prompt size
-    sample_csv = sample.to_csv(index=False)
+    # Derive real top items using fuzzy logic
+    col_product = match_column("product name", df.columns)
+    col_amount = match_column("total amount reimbursed", df.columns)
+
+    answer_context = ""
+    if col_product and col_amount:
+        grouped = df.groupby(col_product)[col_amount].sum().sort_values(ascending=False).head(10)
+        answer_context = "\n".join([f"{k}: ${v:,.2f}" for k, v in grouped.items()])
 
     prompt = (
-        f"You are a data analyst. Answer the question concisely without code. "
-        f"Columns in the dataset: {', '.join(columns)}.\n\n"
-        f"Data sample:\n{sample_csv}\n\n"
-        f"Question: {question}"
+        f"You are a helpful data analyst. Answer questions using this dataset summary:
+"
+        f"{answer_context}
+"
+        f"Now answer this concisely: {question}"
     )
 
     response = openai.chat.completions.create(
@@ -66,7 +72,8 @@ def ask_openai(question, df):
     )
     return response.choices[0].message.content.strip()
 
-# Generate simple chart
+# Generate chart
+
 def generate_chart(df, question):
     num_cols = df.select_dtypes(include='number').columns.tolist()
     cat_cols = df.select_dtypes(exclude='number').columns.tolist()
@@ -80,7 +87,7 @@ def generate_chart(df, question):
 
     chart_data = df.groupby(x_col)[y_col].sum().sort_values(ascending=False).head(10)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(8, 5))  # smaller figure
     chart_data.plot(kind="bar", ax=ax)
     ax.set_title(f"Top 10 {x_col} by {y_col}")
     ax.set_xlabel(x_col)
