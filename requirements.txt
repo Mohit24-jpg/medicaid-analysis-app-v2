@@ -1,6 +1,6 @@
 streamlit
 pandas
-openai>=1.0.0
+openai
 matplotlib
 seaborn
 fuzzywuzzy
