@@ -1,39 +1,63 @@
 import streamlit as st
 import pandas as pd
-import requests
 import openai
+import matplotlib.pyplot as plt
+from io import StringIO
+from fuzzywuzzy import process
 
-st.title("Medicaid Drug Spending NLP Analytics")
-
-# Set API key from Streamlit secrets
+# Securely set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# App layout
+st.set_page_config(page_title="Medicaid Drug Spending NLP", layout="wide")
+st.title("💊 Medicaid Drug Spending NLP Analytics")
+
+# Sidebar inputs
+with st.sidebar:
+    st.header("1️⃣ Upload Medicaid CSV File")
+    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+
+    st.markdown("---")
+    st.header("2️⃣ Ask a Question")
+    question = st.text_input("Enter your question about the data")
+
+    col1, col2 = st.columns(2)
+    text_btn = col1.button("💬 Get Text Answer")
+    chart_btn = col2.button("📊 Generate Chart")
+
+# Stop if no file
+if not uploaded_file:
+    st.info("Please upload a CSV file to get started.")
+    st.stop()
+
+# Load CSV (entire dataset)
 @st.cache_data
-def load_data():
-    url = "https://data.medicaid.gov/resource/srj6-uykx.json?$limit=50000"
-    resp = requests.get(url)
-    resp.raise_for_status()
-    return pd.DataFrame(resp.json())
+def load_csv(file):
+    return pd.read_csv(file)
 
-df = load_data()
+df = load_csv(uploaded_file)
 
-st.success(f"Loaded {len(df)} rows from Medicaid API.")
+# Show preview
+st.subheader("🔍 Data Preview")
+st.dataframe(df.head(10))
 
-st.dataframe(df.head())
+# Helper to fuzzy-match user queries to column names
+def match_column(user_input, column_names):
+    match, score = process.extractOne(user_input.lower(), column_names)
+    return match if score > 70 else None
 
-# NLP Question
-question = st.text_input("Ask a question about the data")
-
+# OpenAI text reasoning
 def ask_openai(question, df):
-    sample = df.head(50).to_csv(index=False)
-    prompt = f"""You are a data analyst. Answer concisely.
-    
-This is a sample of a Medicaid dataset:
-{sample}
+    columns = df.columns.tolist()
+    sample = df.sample(min(len(df), 20))  # limit for prompt size
+    sample_csv = sample.to_csv(index=False)
 
-Now answer this question using the data: {question}
-Only answer with facts that can be inferred from the dataset.
-"""
+    prompt = (
+        f"You are a data analyst. Answer the question concisely without code. "
+        f"Columns in the dataset: {', '.join(columns)}.\n\n"
+        f"Data sample:\n{sample_csv}\n\n"
+        f"Question: {question}"
+    )
 
     response = openai.chat.completions.create(
         model="gpt-4o",
@@ -42,8 +66,40 @@ Only answer with facts that can be inferred from the dataset.
     )
     return response.choices[0].message.content.strip()
 
-if question:
-    with st.spinner("Analyzing with OpenAI..."):
-        answer = ask_openai(question, df)
-        st.markdown("### Answer:")
-        st.write(answer)
+# Generate simple chart
+def generate_chart(df, question):
+    num_cols = df.select_dtypes(include='number').columns.tolist()
+    cat_cols = df.select_dtypes(exclude='number').columns.tolist()
+
+    y_col = match_column("amount reimbursed", num_cols)
+    x_col = match_column("product name", cat_cols)
+
+    if not x_col or not y_col:
+        st.error("Could not determine suitable columns to chart. Try rephrasing the question.")
+        return
+
+    chart_data = df.groupby(x_col)[y_col].sum().sort_values(ascending=False).head(10)
+
+    fig, ax = plt.subplots()
+    chart_data.plot(kind="bar", ax=ax)
+    ax.set_title(f"Top 10 {x_col} by {y_col}")
+    ax.set_xlabel(x_col)
+    ax.set_ylabel(y_col)
+    st.pyplot(fig)
+
+# Buttons logic
+if text_btn:
+    if question.strip() == "":
+        st.warning("Please enter a question.")
+    else:
+        with st.spinner("Asking OpenAI..."):
+            answer = ask_openai(question, df)
+            st.success("Answer:")
+            st.markdown(answer)
+
+if chart_btn:
+    if question.strip() == "":
+        st.warning("Please enter a question.")
+    else:
+        with st.spinner("Generating chart..."):
+            generate_chart(df, question)
