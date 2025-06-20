@@ -4,14 +4,12 @@ import matplotlib.pyplot as plt
 import openai
 import io
 
-# Load API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.set_page_config(page_title="AI Medicaid CSV Analyzer", layout="wide")
 st.title("📊 AI-Powered Medicaid CSV Analyzer")
-st.markdown("Upload a CSV file and ask any question about the data. Use the buttons to get an answer or generate a chart.")
 
-uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+uploaded_file = st.file_uploader("Upload your Medicaid CSV file", type=["csv"])
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -28,31 +26,34 @@ if uploaded_file is not None:
         )
         return response.choices[0].message.content.strip()
 
+    def generate_summary_preview(df):
+        preview = df.head(200)
+        text = preview.to_csv(index=False)
+        return text
+
     def generate_text_answer(df, question):
         try:
-            # Removed 'datetime_is_numeric' for compatibility
-            stats = df.describe(include="all").fillna("").to_string()
+            preview_csv = generate_summary_preview(df)
             messages = [
-                {"role": "system", "content": "You are a helpful data analyst. Answer the question based on the dataset summary without showing code."},
-                {"role": "user", "content": f"Here is a summary of the dataset:\n{stats}"},
+                {
+                    "role": "system",
+                    "content": "You are a helpful data analyst. Answer the user's question based on the uploaded dataset. Be concise and do not show code unless specifically asked."
+                },
+                {"role": "user", "content": f"Here is a sample of the dataset (first 200 rows):\n\n{preview_csv}"},
                 {"role": "user", "content": f"Question: {question}"}
             ]
             return ask_openai(messages)
         except Exception as e:
-            return f"Error analyzing the data: {str(e)}"
+            return f"Error generating answer: {str(e)}"
 
     def generate_chart_code(df, question):
-        try:
-            preview = df.head(20).to_csv(index=False)
-            messages = [
-                {"role": "system", "content": "You are a Python data visualization assistant. Generate Python code using matplotlib or pandas to create a chart for the following question."},
-                {"role": "user", "content": f"Here is a sample of the dataset:\n{preview}"},
-                {"role": "user", "content": f"Generate a matplotlib chart in Python to answer this question: {question}"}
-            ]
-            code = ask_openai(messages)
-            return code
-        except Exception as e:
-            return f"Error generating chart: {str(e)}"
+        preview = df.head(200).to_csv(index=False)
+        messages = [
+            {"role": "system", "content": "You are a Python chart assistant. Generate a matplotlib or pandas chart to answer the question using the sample data."},
+            {"role": "user", "content": f"Here is a sample of the dataset:\n{preview}"},
+            {"role": "user", "content": f"Question: {question}"}
+        ]
+        return ask_openai(messages)
 
     col1, col2 = st.columns([1, 1])
 
@@ -68,13 +69,12 @@ if uploaded_file is not None:
             with st.spinner("Generating chart..."):
                 code = generate_chart_code(df, question)
                 try:
-                    # Secure execution
-                    local_vars = {'df': df, 'plt': plt}
+                    local_vars = {"df": df, "plt": plt}
                     exec(code, {"__builtins__": {}}, local_vars)
                     st.pyplot(plt)
                 except Exception as e:
-                    st.error(f"Chart generation failed: {str(e)}")
+                    st.error(f"Chart failed: {str(e)}")
                     st.code(code)
 
 else:
-    st.warning("Please upload a CSV file to get started.")
+    st.info("Please upload a CSV file to begin.")
