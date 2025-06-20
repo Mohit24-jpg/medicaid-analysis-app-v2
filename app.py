@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import openai
 import io
 
-# Load API key from secrets
+# Load API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.set_page_config(page_title="AI Medicaid CSV Analyzer", layout="wide")
@@ -30,7 +30,8 @@ if uploaded_file is not None:
 
     def generate_text_answer(df, question):
         try:
-            stats = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
+            # Removed 'datetime_is_numeric' for compatibility
+            stats = df.describe(include="all").fillna("").to_string()
             messages = [
                 {"role": "system", "content": "You are a helpful data analyst. Answer the question based on the dataset summary without showing code."},
                 {"role": "user", "content": f"Here is a summary of the dataset:\n{stats}"},
