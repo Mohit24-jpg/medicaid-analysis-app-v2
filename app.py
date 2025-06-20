@@ -2,83 +2,90 @@ import streamlit as st
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
-import seaborn as sns
-import io
+from io import StringIO
+import os
 
-# Set up API key from Streamlit secrets
+st.set_page_config(page_title="Medicaid Data Analyzer", layout="wide")
+
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("🧠 AI-Powered CSV Analysis App")
+st.title("💊 Medicaid Data Analyzer")
 
 # Upload CSV file
-if "df" not in st.session_state:
-    uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.session_state["df"] = df
-        st.success("CSV uploaded and loaded successfully.")
+uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
+
+# Load and cache data
+@st.cache_data(show_spinner=False)
+def load_data(upload):
+    df = pd.read_csv(upload)
+    return df
+
+# Analysis: Top reimbursed products
+def analyze_top_products_by_reimbursed(df):
+    df.columns = df.columns.str.lower()
+    product_col = [col for col in df.columns if 'product' in col or 'drug' in col][0]
+    amount_col = [col for col in df.columns if 'reimbursed' in col or 'amount' in col][0]
+    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0)
+    top_products = df.groupby(product_col)[amount_col].sum().sort_values(ascending=False).head(3)
+    return top_products
+
+# Analysis: Total reimbursed
+def get_total_reimbursed(df):
+    df.columns = df.columns.str.lower()
+    amount_col = [col for col in df.columns if 'reimbursed' in col or 'amount' in col][0]
+    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0)
+    return df[amount_col].sum()
+
+# GPT Explanation
+def explain_with_gpt(summary):
+    messages = [
+        {"role": "system", "content": "You are a helpful medical data analyst."},
+        {"role": "user", "content": f"Please explain the following summary:
+{summary}"}
+    ]
+    response = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        temperature=0.3
+    )
+    return response.choices[0].message.content
+
+if uploaded_file:
+    df = load_data(uploaded_file)
+    st.subheader("Data Preview")
+    st.dataframe(df.head(50), use_container_width=True)
+
+    question = st.text_input("Ask a question about the dataset:")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Get Answer"):
+            if "top" in question and "reimbursed" in question:
+                try:
+                    top_products = analyze_top_products_by_reimbursed(df)
+                    st.write("Top 3 most reimbursed products:")
+                    for name, amount in top_products.items():
+                        st.markdown(f"- **{name}**: ${amount:,.2f}")
+                except Exception as e:
+                    st.error(f"Failed to analyze data: {e}")
+            elif "total" in question and "reimbursed" in question:
+                total = get_total_reimbursed(df)
+                st.success(f"Total amount reimbursed: ${total:,.2f}")
+            else:
+                st.warning("This app currently supports questions about top reimbursed drugs and total reimbursements.")
+
+    with col2:
+        if st.button("Explain with GPT"):
+            if "top" in question and "reimbursed" in question:
+                top_products = analyze_top_products_by_reimbursed(df)
+                summary = top_products.to_string()
+                explanation = explain_with_gpt(summary)
+                st.markdown(explanation)
+            elif "total" in question and "reimbursed" in question:
+                total = get_total_reimbursed(df)
+                explanation = explain_with_gpt(f"The total amount reimbursed is ${total:,.2f}")
+                st.markdown(explanation)
+            else:
+                st.warning("Only supported for reimbursement questions right now.")
 else:
-    df = st.session_state["df"]
-
-if "df" in st.session_state:
-    st.subheader("Preview of your data")
-    st.dataframe(df.head())
-
-    question = st.text_input("Ask a question about your data")
-
-    def ask_gpt(question, df, mode="text"):
-        sample_data = df.sample(min(500, len(df))).to_csv(index=False)
-        prompt = f"""
-You are a smart data analyst.
-
-Here is a preview of the uploaded CSV (first 500 rows):
-
-{sample_data}
-
-The user asked:
-"{question}"
-
-If mode is 'text': Provide only a concise, relevant answer from the data.
-If mode is 'chart': Provide only valid Python code that defines a function `generate_chart(df)` using matplotlib or seaborn to visualize the answer.
-Do not explain the code, just output the code only.
-
-Mode: {mode}
-"""
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-        )
-        return response.choices[0].message.content.strip()
-
-    if question:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("💬 Get Answer"):
-                with st.spinner("Thinking..."):
-                    try:
-                        answer = ask_gpt(question, df, mode="text")
-                        st.markdown(f"**Answer:** {answer}")
-                    except Exception as e:
-                        st.error(f"Failed to generate answer: {e}")
-
-        with col2:
-            if st.button("📊 Generate Chart"):
-                with st.spinner("Generating chart..."):
-                    try:
-                        code = ask_gpt(question, df, mode="chart")
-                        st.code(code, language="python")
-
-                        # Execute chart code safely
-                        local_vars = {}
-                        exec(code, {"df": df, "plt": plt, "sns": sns}, local_vars)
-                        chart_func = local_vars.get("generate_chart")
-
-                        if chart_func:
-                            chart_func(df)
-                            st.pyplot()
-                        else:
-                            st.warning("No chart function generated.")
-                    except Exception as e:
-                        st.error(f"Chart execution failed: {e}")
+    st.info("Please upload a CSV file to begin.")
