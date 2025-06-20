@@ -1,87 +1,84 @@
 import streamlit as st
 import pandas as pd
-from fuzzywuzzy import process
 import openai
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
 
+# Set up API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("Medicaid Dataset NLP Analyzer")
+st.title("🧠 AI-Powered CSV Analysis App")
 
-uploaded_file = st.file_uploader("Upload any CSV file", type=["csv"])
-
-def find_best_numeric_column(df, question):
-    numeric_cols = df.select_dtypes(include='number').columns.tolist()
-    if not numeric_cols:
-        return None
-    best_match, score = process.extractOne(question.lower(), [col.lower() for col in numeric_cols])
-    if score > 80:
-        # Return original case-sensitive column name matching the lowercase best_match
-        for col in numeric_cols:
-            if col.lower() == best_match:
-                return col
-    return None
-
-def generate_answer(df, question):
-    # Normalize columns to lowercase stripped for matching
-    df.columns = df.columns.str.lower().str.strip()
-    question_lower = question.lower()
-
-    # Try to find a numeric column that best matches question keywords
-    matched_col = find_best_numeric_column(df, question_lower)
-
-    if matched_col and ('total' in question_lower or 'sum' in question_lower or 'amount' in question_lower):
-        # Provide the real sum answer from full dataset
-        total = df[matched_col].sum()
-        return f"The total of '{matched_col}' is: ${total:,.2f}"
-
-    # If no numeric column match or question not about totals, fallback to GPT
-
-    # Sample up to 300 rows for prompt size limits
-    sample_df = df.sample(min(300, len(df))).copy()
-    sample_csv = sample_df.to_csv(index=False)
-
-    prompt = f"""You are a data analyst. Given the following CSV data preview, answer the user's question briefly and exactly without extra explanation.
-
-CSV Data Preview:
-{sample_csv}
-
-User Question: {question}
-Answer:"""
-
-    messages = [
-        {"role": "system", "content": "You are a helpful data analyst assistant."},
-        {"role": "user", "content": prompt},
-    ]
-
-    response = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0,
-        max_tokens=300,
-    )
-    answer = response.choices[0].message.content.strip()
-    return answer
-
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.subheader("Data Preview")
-    st.dataframe(df.head(10))
-
-    question = st.text_input("Ask a question about your dataset")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Get Text Answer"):
-            if not question:
-                st.warning("Please enter a question first.")
-            else:
-                with st.spinner("Analyzing..."):
-                    answer = generate_answer(df, question)
-                st.success("Answer:")
-                st.write(answer)
-    with col2:
-        if st.button("Get Chart (Coming Soon)"):
-            st.info("Chart generation will be implemented soon.")
-
+# Upload CSV file
+if "df" not in st.session_state:
+    uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+        st.session_state["df"] = df
+        st.success("CSV uploaded and loaded successfully.")
 else:
-    st.info("Please upload a CSV file to start.")
+    df = st.session_state["df"]
+
+if "df" in st.session_state:
+    st.subheader("Preview of your data")
+    st.dataframe(df.head())
+
+    question = st.text_input("Ask a question about your data")
+
+    def ask_gpt(question, df, mode="text"):
+        sample_data = df.sample(min(500, len(df))).to_csv(index=False)
+        prompt = f"""
+You are a smart data analyst.
+
+Here is a preview of the uploaded CSV (first 500 rows):
+
+{sample_data}
+
+The user asked:
+"{question}"
+
+If mode is 'text': Provide only a concise, relevant answer from the data.
+If mode is 'chart': Provide only valid Python code that defines a function `generate_chart(df)` using matplotlib or seaborn to visualize the answer.
+Do not explain the code, just output the code only.
+
+Mode: {mode}
+"""
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        return response.choices[0].message.content.strip()
+
+    if question:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("💬 Get Answer"):
+                with st.spinner("Thinking..."):
+                    try:
+                        answer = ask_gpt(question, df, mode="text")
+                        st.markdown(f"**Answer:** {answer}")
+                    except Exception as e:
+                        st.error(f"Failed to generate answer: {e}")
+
+        with col2:
+            if st.button("📊 Generate Chart"):
+                with st.spinner("Generating chart..."):
+                    try:
+                        code = ask_gpt(question, df, mode="chart")
+                        st.code(code, language="python")
+
+                        # Execute chart code safely
+                        local_vars = {}
+                        exec(code, {"df": df, "plt": plt, "sns": sns}, local_vars)
+                        chart_func = local_vars.get("generate_chart")
+
+                        if chart_func:
+                            chart_func(df)
+                            st.pyplot()
+                        else:
+                            st.warning("No chart function generated.")
+                    except Exception as e:
+                        st.error(f"Chart execution failed: {e}")
