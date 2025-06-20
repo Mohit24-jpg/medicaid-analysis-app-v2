@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
-import io
 
-# Set OpenAI API key from secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.title("Medicaid Drug Spending NLP Analytics")
@@ -19,14 +17,12 @@ if not (state and year and uploaded_file):
     st.info("Please enter state abbreviation, year, and upload a CSV file to proceed.")
     st.stop()
 
-# Load CSV from upload
 @st.cache_data
 def load_data(uploaded_file):
     try:
-        df = pd.read_csv(uploaded_file)
-        return df
+        return pd.read_csv(uploaded_file)
     except Exception as e:
-        st.error(f"Error loading CSV: {e}")
+        st.error(f"Failed to read CSV: {e}")
         return None
 
 df = load_data(uploaded_file)
@@ -36,68 +32,69 @@ if df is None:
 st.subheader(f"Data preview: {state.upper()} {year}")
 st.dataframe(df.head(10))
 
-# Helper: call OpenAI ChatCompletion with conversation
-def ask_openai_chat(messages):
+# ---------------- GPT Logic ----------------
+
+def ask_openai(messages):
     response = openai.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=messages,
-        temperature=0,
+        temperature=0
     )
     return response.choices[0].message.content.strip()
 
-# Generate answer (text) by sending question + CSV summary
 def generate_text_answer(df, question):
-    # Provide summary and column list
-    summary = df.describe(include="all", datetime_is_numeric=True).fillna("").to_string()
-    columns = ", ".join(df.columns.tolist())
+    # Sample raw data if too large
+    sample_data = df.sample(n=min(100, len(df))).to_dict(orient="records")
+
     messages = [
-        {"role": "system", "content": "You are a helpful data analyst assistant."},
-        {
-            "role": "user",
-            "content": (
-                f"Here is a summary of the dataset:\n{summary}\n"
-                f"Columns available: {columns}\n"
-                f"Answer the question concisely: {question}"
-            ),
-        },
+        {"role": "system", "content": "You are a data analyst. Answer only based on the data provided."},
+        {"role": "user", "content": f"The dataset has the following columns:\n{', '.join(df.columns)}"},
+        {"role": "user", "content": f"Here is a sample of the dataset:\n{sample_data}"},
+        {"role": "user", "content": f"Answer concisely: {question}"}
     ]
-    return ask_openai_chat(messages)
+    return ask_openai(messages)
 
-# Generate chart (bar chart example)
 def generate_chart(df, question):
-    # Let GPT suggest columns and chart type, here simplified
-    # For demo, just show top 5 by a numeric column named vaguely "amount"
-    # In production, use GPT to parse question and suggest chart type & columns
-    numeric_cols = df.select_dtypes(include='number').columns.tolist()
-    if not numeric_cols:
-        st.error("No numeric columns found to create chart.")
-        return
-    col = numeric_cols[0]
-    top5 = df.groupby(df.columns[0])[col].sum().sort_values(ascending=False).head(5)
-    fig, ax = plt.subplots()
-    top5.plot(kind='bar', ax=ax)
-    ax.set_title(f"Top 5 {df.columns[0]} by {col}")
-    ax.set_ylabel(col)
-    st.pyplot(fig)
+    # Let GPT decide which chart to create
+    sample_data = df.sample(n=min(100, len(df))).to_dict(orient="records")
+    messages = [
+        {"role": "system", "content": "You're a Python data visualization assistant. Use matplotlib and pandas. Don't explain, only give code."},
+        {"role": "user", "content": f"Sample data:\n{sample_data}"},
+        {"role": "user", "content": f"Write Python code to create a chart answering: {question}"}
+    ]
 
-st.subheader("Ask a question about the dataset")
-question = st.text_input("Enter your question here")
+    code = ask_openai(messages)
+
+    try:
+        # Execute the charting code in a safe context
+        local_vars = {"df": df, "plt": plt}
+        exec(code, {}, local_vars)
+        fig = plt.gcf()
+        st.pyplot(fig)
+    except Exception as e:
+        st.error(f"Failed to create chart: {e}")
+        st.code(code)
+
+# ---------------- UI ----------------
+
+st.subheader("Ask a question about your dataset")
+question = st.text_input("Enter your question")
 
 col1, col2 = st.columns(2)
 
 with col1:
     if st.button("Get Text Answer"):
-        if question.strip() == "":
-            st.warning("Please enter a question.")
-        else:
-            with st.spinner("Generating answer..."):
+        if question:
+            with st.spinner("Analyzing..."):
                 answer = generate_text_answer(df, question)
                 st.markdown(f"**Answer:** {answer}")
+        else:
+            st.warning("Enter a question first.")
 
 with col2:
     if st.button("Create Chart"):
-        if question.strip() == "":
-            st.warning("Please enter a question for the chart.")
-        else:
-            with st.spinner("Creating chart..."):
+        if question:
+            with st.spinner("Generating chart..."):
                 generate_chart(df, question)
+        else:
+            st.warning("Enter a question to generate a chart.")
