@@ -80,8 +80,7 @@ def generate_text_answer(df, question):
     matched_cols = fuzzy_column_match(question, df.columns)
 
     context_text = (
-        f"Dataset info for {state} {year}:
-"
+        f"Dataset info for {state} {year}:\n"
         f"- Total reimbursed: ${total_reimbursed:,.2f}\n"
         f"- Top 3 by reimbursed amount:\n" +
         "\n".join([f"  {i+1}. {k}: ${v:,.2f}" for i, (k, v) in enumerate(top3.items())]) +
@@ -116,11 +115,12 @@ with col1:
         else:
             with st.spinner("Thinking..."):
                 answer = generate_text_answer(df, question)
-                st.markdown("""
-                <div style="border:1px solid #ccc; padding:12px; border-radius:8px; background-color:#f9f9f9">
-                <strong>💡 Answer:</strong><br>
-                {}</div>
-                """.format(answer), unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <div style="border:1px solid #ccc; padding:12px; border-radius:8px; background-color:#f9f9f9">
+                    <strong>💡 Answer:</strong><br>
+                    {}</div>
+                    """.format(answer), unsafe_allow_html=True)
 
 with col2:
     if st.button("📊 Create Chart"):
