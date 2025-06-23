@@ -7,6 +7,9 @@ from fuzzywuzzy import process
 # Set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# Show logo
+st.image("assets/logo.png", width=150)
+
 st.title("Medicaid Drug Spending NLP Analytics")
 
 # Upload CSV file
