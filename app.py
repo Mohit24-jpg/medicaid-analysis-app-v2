@@ -3,7 +3,6 @@ import pandas as pd
 import openai
 import matplotlib.pyplot as plt
 from fuzzywuzzy import process
-import requests
 
 # Set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
@@ -13,55 +12,32 @@ st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 
 st.markdown("""
-#### Ask questions and generate charts using live Medicaid drug data
+#### Ask questions and generate charts using Medicaid drug spending CSV data
 """)
 
-# Sidebar filters
-with st.sidebar:
-    st.header("📊 Filter Dataset")
-    state = st.text_input("Enter state abbreviation (e.g. OH)", max_chars=2).upper()
-    year = st.text_input("Enter year (e.g. 2023)", max_chars=4)
-    quarter = st.selectbox("Select quarter", options=["", "1", "2", "3", "4"])
-
-if not (state and year):
-    st.info("Please enter state and year to load data.")
-    st.stop()
+# Load CSV from GitHub
+CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/refs/heads/master/data-06-17-2025-2_01pm.csv"
 
 @st.cache_data(show_spinner=True)
-def load_data(state, year, quarter):
-    base_url = "https://data.medicaid.gov/resource/ynj2-r877.json"
-    # Build where clause with optional quarter
-    where_clause = f"state='{state}' AND year='{year}'"
-    if quarter:
-        where_clause += f" AND quarter='{quarter}'"
-    params = {
-        "$limit": 50000,
-        "$where": where_clause
-    }
-    try:
-        resp = requests.get(base_url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        df = pd.DataFrame(data)
-        # Convert numeric columns
-        for col in ["total_amount_reimbursed", "number_of_prescriptions", "units_reimbursed"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        return df
-    except Exception as e:
-        st.error(f"Failed to load data: {e}")
-        return pd.DataFrame()
+def load_data_from_github():
+    df = pd.read_csv(CSV_URL)
+    # Convert numeric fields
+    num_cols = [
+        "Units Reimbursed", "Number of Prescriptions",
+        "Total Amount Reimbursed", "Medicaid Amount Reimbursed",
+        "Non Medicaid Amount Reimbursed"
+    ]
+    for col in num_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
-df = load_data(state, year, quarter)
-if df.empty:
-    st.warning("No data returned. Check filters or try another state/year.")
-    st.stop()
+df = load_data_from_github()
 
 # Preview
-st.subheader(f"📄 Preview for {state} - {year} Q{quarter or 'All'}")
+st.subheader("📄 Preview of the uploaded dataset")
 st.dataframe(df.head(10))
 
-# Helper for fuzzy column matching
+# Column mapping helper
 def fuzzy_column_match(question, columns):
     matches = {}
     for col in columns:
@@ -79,12 +55,12 @@ def ask_openai_chat(messages):
     return response.choices[0].message.content.strip()
 
 def generate_text_answer(df, question):
-    top3 = df.groupby("product_name")["total_amount_reimbursed"].sum().sort_values(ascending=False).head(3)
-    total_reimbursed = df["total_amount_reimbursed"].sum()
+    top3 = df.groupby("Product Name")["Total Amount Reimbursed"].sum().sort_values(ascending=False).head(3)
+    total_reimbursed = df["Total Amount Reimbursed"].sum()
     matched_cols = fuzzy_column_match(question, df.columns)
 
     context_text = (
-        f"Dataset info for {state} {year}:\n"
+        f"Dataset info:\n"
         f"- Total reimbursed: ${total_reimbursed:,.2f}\n"
         f"- Top 3 by reimbursed amount:\n" +
         "\n".join([f"  {i+1}. {k}: ${v:,.2f}" for i, (k, v) in enumerate(top3.items())]) +
@@ -99,7 +75,7 @@ def generate_text_answer(df, question):
     return ask_openai_chat(messages)
 
 def generate_chart(df, question):
-    top5 = df.groupby("product_name")["total_amount_reimbursed"].sum().sort_values(ascending=False).head(5)
+    top5 = df.groupby("Product Name")["Total Amount Reimbursed"].sum().sort_values(ascending=False).head(5)
     fig, ax = plt.subplots(figsize=(8, 4))
     top5.plot(kind="bar", ax=ax, color="steelblue")
     ax.set_title("Top 5 Products by Total Amount Reimbursed")
@@ -107,10 +83,11 @@ def generate_chart(df, question):
     plt.xticks(rotation=30, ha="right")
     st.pyplot(fig)
 
+# Input and output layout
 st.subheader("💬 Ask a question about this dataset")
 question = st.text_input("Ask anything like 'Top 5 drugs by prescriptions'")
-
 col1, col2 = st.columns(2)
+
 with col1:
     if st.button("🧠 Get Text Answer"):
         if not question.strip():
@@ -121,10 +98,9 @@ with col1:
                 st.markdown(
                     f"""
                     <div style="border:1px solid #ccc; padding:12px; border-radius:8px; background-color:#f9f9f9">
-                    <strong>💡 Answer:</strong><br>{answer}</div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                    <strong>💡 Answer:</strong><br>
+                    {answer}</div>
+                    """, unsafe_allow_html=True)
 
 with col2:
     if st.button("📊 Create Chart"):
