@@ -12,7 +12,7 @@ st.set_page_config(page_title="Medicaid Drug Analytics", layout="wide")
 # --- UI Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/main/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
-st.markdown("#### Ask any question about the dataset below and generate insights or charts without manual coding.")
+st.markdown("#### Ask any question about the dataset below and generate precise figures or charts without hard-coding.")
 
 # --- Data Loading and Cleaning ---
 CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
@@ -59,12 +59,21 @@ def bottom_n(column: str, n: int) -> dict:
         return series.to_dict()
     raise ValueError(f"Cannot compute bottom_n for '{column}'")
 
-# Define function metadata
+
+def sum_by_product(column: str) -> dict:
+    """Sum a numeric column grouped by product_name"""
+    if column in df.columns and pd.api.types.is_numeric_dtype(df[column]):
+        series = df.groupby('product_name')[column].sum().sort_values(ascending=False)
+        return series.to_dict()
+    raise ValueError(f"Cannot group-sum for '{column}'")
+
+# Function metadata
 functions = [
     {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
     {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
     {"name": "top_n", "description": "Get top N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}}
+    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "sum_by_product", "description": "Sum numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
 # --- UI: Interaction ---
@@ -72,25 +81,25 @@ st.subheader("📄 Data Preview")
 st.dataframe(df.head(10))
 
 st.subheader("❓ Ask a Question")
-question = st.text_input("Enter question (e.g. 'Count unique utilization_type', 'Top 5 by units_reimbursed')")
+question = st.text_input("Enter question (e.g. 'Sum number_of_prescriptions by product')")
 
 col1, col2 = st.columns(2)
 with col1:
-    if st.button("🧠 Get Text Answer"):
+    if st.button("Get Text Answer"):
         if not question:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Thinking..."):
-                chat_resp = openai.chat.completions.create(
+                resp = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You are an analytic assistant."},
+                        {"role": "system", "content": "You are an analytic assistant. Use function calling for precise results."},
                         {"role": "user", "content": question}
                     ],
                     functions=functions,
                     function_call="auto"
                 )
-                msg = chat_resp.choices[0].message
+                msg = resp.choices[0].message
                 if msg.function_call:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
@@ -102,21 +111,21 @@ with col1:
                 else:
                     st.markdown(msg.content)
 with col2:
-    if st.button("📊 Create Chart"):
+    if st.button("Create Chart"):
         if not question:
             st.warning("Enter a question first.")
         else:
             with st.spinner("Charting..."):
-                chat_resp = openai.chat.completions.create(
+                resp = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You are an analytic assistant."},
+                        {"role": "system", "content": "You are an analytic assistant. Use function calling for chart data."},
                         {"role": "user", "content": question}
                     ],
                     functions=functions,
                     function_call="auto"
                 )
-                msg = chat_resp.choices[0].message
+                msg = resp.choices[0].message
                 if msg.function_call:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
