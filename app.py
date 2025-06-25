@@ -65,9 +65,9 @@ digest = {
     'top_reimbursement': top_by_reimbursement.head(5).to_dict()
 }
 
-# GPT call
+# GPT call using new OpenAI Python v1+ interface
 def ask_gpt(prompt):
-    resp = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a data analyst assistant specializing in Medicaid drug spending."},
@@ -75,19 +75,17 @@ def ask_gpt(prompt):
         ],
         temperature=0
     )
-    return resp.choices[0].message.content.strip()
+    return response.choices[0].message.content.strip()
 
 # Build dynamic prompt based on user question
 def build_prompt(question):
     col = resolve_column(question)
-    # Craft prompt including digest and directive
     prompt = (
         f"Dataset digest:\n"
         f"Top 5 by units reimbursed: {digest['top_units']}\n"
         f"Bottom 5 by prescriptions: {digest['bottom_prescriptions']}\n"
         f"Top 5 by reimbursement: {digest['top_reimbursement']}\n"
-        f"When asked about '{question}', use column '{col}' and the full dataset to provide an accurate answer."
-        " Do not explain your reasoning, just give the result." 
+        f"When asked about '{question}', focus on column '{col}' and answer concisely using the full dataset."
     )
     return prompt
 
@@ -96,7 +94,7 @@ def plot_metric(question):
     col = resolve_column(question)
     series = df.groupby('product_name')[col].sum().sort_values(ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(8, 4))
-    series.plot(kind='bar', ax=ax)
+    series.plot(kind='bar', ax=ax, color='#3498db')
     ax.set_title(f"Top 10 Products by {col.replace('_', ' ').title()}")
     ax.set_ylabel(col.replace('_', ' ').title())
     plt.xticks(rotation=30, ha='right')
@@ -107,7 +105,7 @@ st.subheader("📄 Data Preview")
 st.dataframe(df.head(10))
 
 st.subheader("❓ Ask a Question")
-question = st.text_input("Enter your question (e.g. 'Show top drugs by units reimbursed')")
+question = st.text_input("Enter your question (e.g., 'Create chart of top drugs by units reimbursed')")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -119,7 +117,7 @@ with col1:
                 prompt = build_prompt(question)
                 answer = ask_gpt(prompt)
                 st.markdown(
-                    f"<div style='padding:15px; background:#f9f9f9; border-radius:8px;'>" 
+                    f"<div style='padding:15px; background:#f9f9f9; border-radius:8px;'>"
                     f"<strong>Answer:</strong><br>{answer}</div>",
                     unsafe_allow_html=True
                 )
