@@ -61,48 +61,10 @@ def bottom_n(column: str, n: int) -> dict:
 
 # Define function metadata
 functions = [
-    {
-        "name": "count_unique",
-        "description": "Count unique values in a column",
-        "parameters": {
-            "type": "object",
-            "properties": {"column": {"type": "string", "description": "Column name to count unique values"}},
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "sum_column",
-        "description": "Sum all values in a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {"column": {"type": "string", "description": "Numeric column to sum"}},
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "top_n",
-        "description": "Get top N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string", "description": "Numeric column to rank"},
-                "n": {"type": "integer", "description": "Number of top items to return"}
-            },
-            "required": ["column", "n"]
-        }
-    },
-    {
-        "name": "bottom_n",
-        "description": "Get bottom N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string", "description": "Numeric column to rank"},
-                "n": {"type": "integer", "description": "Number of bottom items to return"}
-            },
-            "required": ["column", "n"]
-        }
-    }
+    {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "top_n", "description": "Get top N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}}
 ]
 
 # --- UI: Interaction ---
@@ -110,7 +72,7 @@ st.subheader("📄 Data Preview")
 st.dataframe(df.head(10))
 
 st.subheader("❓ Ask a Question")
-question = st.text_input("Enter question (e.g. 'Count unique utilization type', 'Top 5 by units reimbursed')")
+question = st.text_input("Enter question (e.g. 'Count unique utilization_type', 'Top 5 by units_reimbursed')")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -119,7 +81,6 @@ with col1:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Thinking..."):
-                # Call GPT with function calling (new API)
                 chat_resp = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -129,14 +90,17 @@ with col1:
                     functions=functions,
                     function_call="auto"
                 )
-                message = chat_resp.choices[0].message
-                if message.function_call:
-                    fname = message.function_call.name
-                    args = json.loads(message.function_call.arguments)
-                    result = globals()[fname](**args)
-                    st.markdown(f"**{fname} result:** {result}")
+                msg = chat_resp.choices[0].message
+                if msg.function_call:
+                    fname = msg.function_call.name
+                    args = json.loads(msg.function_call.arguments)
+                    try:
+                        result = globals()[fname](**args)
+                        st.markdown(f"**{fname} result:** {result}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
                 else:
-                    st.markdown(message.content)
+                    st.markdown(msg.content)
 with col2:
     if st.button("📊 Create Chart"):
         if not question:
@@ -152,16 +116,19 @@ with col2:
                     functions=functions,
                     function_call="auto"
                 )
-                message = chat_resp.choices[0].message
-                if message.function_call:
-                    fname = message.function_call.name
-                    args = json.loads(message.function_call.arguments)
-                    data = globals()[fname](**args)
-                    series = pd.Series(data)
-                    fig, ax = plt.subplots(figsize=(8,4))
-                    series.plot(kind='bar', ax=ax)
-                    ax.set_title(f"{fname} on {args.get('column')}")
-                    plt.xticks(rotation=30, ha='right')
-                    st.pyplot(fig)
+                msg = chat_resp.choices[0].message
+                if msg.function_call:
+                    fname = msg.function_call.name
+                    args = json.loads(msg.function_call.arguments)
+                    try:
+                        data = globals()[fname](**args)
+                        series = pd.Series(data)
+                        fig, ax = plt.subplots(figsize=(8,4))
+                        series.plot(kind='bar', ax=ax)
+                        ax.set_title(f"{fname} on {args.get('column')}")
+                        plt.xticks(rotation=30, ha='right')
+                        st.pyplot(fig)
+                    except Exception as e:
+                        st.error(f"Error: {e}")
                 else:
-                    st.write(message.content)
+                    st.write(msg.content)
