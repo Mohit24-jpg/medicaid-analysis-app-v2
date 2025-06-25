@@ -119,8 +119,8 @@ with col1:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Thinking..."):
-                # Call GPT with function calling
-                chat_resp = openai.ChatCompletion.create(
+                # Call GPT with function calling (new API)
+                chat_resp = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are an analytic assistant."},
@@ -130,10 +130,9 @@ with col1:
                     function_call="auto"
                 )
                 message = chat_resp.choices[0].message
-                if message.get("function_call"):
-                    fname = message["function_call"]["name"]
-                    args = json.loads(message["function_call"]["arguments"])
-                    # Dispatch
+                if message.function_call:
+                    fname = message.function_call.name
+                    args = json.loads(message.function_call.arguments)
                     result = globals()[fname](**args)
                     st.markdown(f"**{fname} result:** {result}")
                 else:
@@ -144,8 +143,7 @@ with col2:
             st.warning("Enter a question first.")
         else:
             with st.spinner("Charting..."):
-                # Use function calling concept for chart
-                chat_resp = openai.ChatCompletion.create(
+                chat_resp = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are an analytic assistant."},
@@ -155,11 +153,10 @@ with col2:
                     function_call="auto"
                 )
                 message = chat_resp.choices[0].message
-                if message.get("function_call"):
-                    fname = message["function_call"]["name"]
-                    args = json.loads(message["function_call"]["arguments"])
+                if message.function_call:
+                    fname = message.function_call.name
+                    args = json.loads(message.function_call.arguments)
                     data = globals()[fname](**args)
-                    # Plot
                     series = pd.Series(data)
                     fig, ax = plt.subplots(figsize=(8,4))
                     series.plot(kind='bar', ax=ax)
