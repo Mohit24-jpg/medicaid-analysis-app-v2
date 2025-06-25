@@ -4,117 +4,129 @@ import openai
 import matplotlib.pyplot as plt
 from fuzzywuzzy import process
 
-# Set OpenAI API key from Streamlit secrets
+# --- Configuration ---
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+st.set_page_config(page_title="Medicaid Drug Analytics", layout="wide")
 
-st.set_page_config(page_title="Medicaid Drug Spending App", layout="wide")
+# --- UI Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/main/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
+st.markdown("#### Ask any question about the dataset below and generate insights or charts without manual coding.")
 
-st.markdown("""
-#### Ask questions and generate charts using Medicaid drug data from GitHub
-""")
-
-# GitHub CSV file URL
+# --- Data Loading and Cleaning ---
 CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
 
 @st.cache_data(show_spinner=True)
-def load_data():
+def load_and_clean():
     df = pd.read_csv(CSV_URL)
-    num_cols = [
-        "Total Amount Reimbursed",
-        "Number of Prescriptions",
-        "Units Reimbursed"
-    ]
-    for col in num_cols:
+    # Normalize column names
+    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+    # Numeric conversion and fill
+    for col in ['units_reimbursed', 'number_of_prescriptions', 'total_amount_reimbursed',
+                'medicaid_amount_reimbursed', 'non_medicaid_amount_reimbursed']:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
-df = load_data()
+df = load_and_clean()
 if df.empty:
-    st.warning("No data returned from the CSV file.")
+    st.error("Failed to load dataset. Please check the CSV URL.")
     st.stop()
 
-# Preview
-display_cols = [col for col in df.columns if len(col) < 60]
-st.subheader("📄 Preview of Dataset")
-st.dataframe(df[display_cols].head(10))
+# --- Precompute Summaries ---
+top_by_units = df.groupby('product_name')['units_reimbursed'].sum().sort_values(ascending=False).head(10)
+top_by_prescriptions = df.groupby('product_name')['number_of_prescriptions'].sum().sort_values(ascending=False).head(10)
+top_by_reimbursement = df.groupby('product_name')['total_amount_reimbursed'].sum().sort_values(ascending=False).head(10)
+bottom_by_prescriptions = df.groupby('product_name')['number_of_prescriptions'].sum().sort_values().head(10)
 
-# Column mapping helper
-def fuzzy_column_match(question, columns):
-    matches = {}
-    for col in columns:
-        score = process.extractOne(col, [question])[1]
-        matches[col] = score
-    good_matches = [col for col, score in matches.items() if score > 60]
-    return good_matches if good_matches else columns
+# --- Helper Functions ---
+SYNONYMS = {
+    'units': 'units_reimbursed',
+    'prescriptions': 'number_of_prescriptions',
+    'reimbursed': 'total_amount_reimbursed',
+    'medicaid': 'medicaid_amount_reimbursed',
+    'non_medicaid': 'non_medicaid_amount_reimbursed'
+}
 
-def ask_openai_chat(messages):
-    response = openai.chat.completions.create(
+def resolve_column(question):
+    q = question.lower()
+    for key, col in SYNONYMS.items():
+        if key in q:
+            return col
+    # Fallback: fuzzy match
+    matches = {col: process.extractOne(col, [question])[1] for col in df.columns}
+    best = max(matches, key=matches.get)
+    return best
+
+# Build a small data digest for GPT context
+digest = {
+    'top_units': top_by_units.head(5).to_dict(),
+    'bottom_prescriptions': bottom_by_prescriptions.head(5).to_dict(),
+    'top_reimbursement': top_by_reimbursement.head(5).to_dict()
+}
+
+# GPT call
+def ask_gpt(prompt):
+    resp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
-        messages=messages,
+        messages=[
+            {"role": "system", "content": "You are a data analyst assistant specializing in Medicaid drug spending."},
+            {"role": "user", "content": prompt}
+        ],
         temperature=0
     )
-    return response.choices[0].message.content.strip()
+    return resp.choices[0].message.content.strip()
 
-def generate_text_answer(df, question):
-    total_reimbursed = df["Total Amount Reimbursed"].sum()
-    top3 = df.groupby("Product Name")["Total Amount Reimbursed"].sum().sort_values(ascending=False).head(3)
-    bottom3 = df.groupby("Product Name")["Number of Prescriptions"].sum().sort_values().head(3)
-    matched_cols = fuzzy_column_match(question, df.columns)
+# Build dynamic prompt based on user question
+def build_prompt(question):
+    col = resolve_column(question)
+    # Craft prompt including digest and directive
+    prompt = (
+        f"Dataset digest:\n"
+        f"Top 5 by units reimbursed: {digest['top_units']}\n"
+        f"Bottom 5 by prescriptions: {digest['bottom_prescriptions']}\n"
+        f"Top 5 by reimbursement: {digest['top_reimbursement']}\n"
+        f"When asked about '{question}', use column '{col}' and the full dataset to provide an accurate answer."
+        " Do not explain your reasoning, just give the result." 
+    )
+    return prompt
 
-    if "least prescribed" in question.lower():
-        table = "\n".join([f"  {i+1}. {k}: {v:,.0f} prescriptions" for i, (k, v) in enumerate(bottom3.items())])
-        context_text = f"The least prescribed drugs based on the dataset are:\n{table}"
-    else:
-        context_text = (
-            f"Dataset info:\n"
-            f"- Total reimbursed: ${total_reimbursed:,.2f}\n"
-            f"- Top 3 by reimbursed amount:\n" +
-            "\n".join([f"  {i+1}. {k}: ${v:,.2f}" for i, (k, v) in enumerate(top3.items())]) +
-            f"\n\nColumns matched to your question: {', '.join(matched_cols)}\n\n"
-            f"Answer the following question concisely:\n{question}"
-        )
-
-    messages = [
-        {"role": "system", "content": "You are a helpful Medicaid drug data analyst."},
-        {"role": "user", "content": context_text}
-    ]
-    return ask_openai_chat(messages)
-
-def generate_chart(df, question):
-    top5 = df.groupby("Product Name")["Total Amount Reimbursed"].sum().sort_values(ascending=False).head(5)
+# --- Charting Utility ---
+def plot_metric(question):
+    col = resolve_column(question)
+    series = df.groupby('product_name')[col].sum().sort_values(ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(8, 4))
-    top5.plot(kind="bar", ax=ax, color="steelblue")
-    ax.set_title("Top 5 Products by Total Amount Reimbursed")
-    ax.set_ylabel("Reimbursed ($)")
-    plt.xticks(rotation=30, ha="right")
+    series.plot(kind='bar', ax=ax)
+    ax.set_title(f"Top 10 Products by {col.replace('_', ' ').title()}")
+    ax.set_ylabel(col.replace('_', ' ').title())
+    plt.xticks(rotation=30, ha='right')
     st.pyplot(fig)
 
-# Input and output layout
-st.subheader("💬 Ask a question about this dataset")
-question = st.text_input("Ask anything like 'Top 5 drugs by prescriptions'")
-col1, col2 = st.columns(2)
+# --- UI: Display Preview and Interaction ---
+st.subheader("📄 Data Preview")
+st.dataframe(df.head(10))
 
+st.subheader("❓ Ask a Question")
+question = st.text_input("Enter your question (e.g. 'Show top drugs by units reimbursed')")
+
+col1, col2 = st.columns(2)
 with col1:
     if st.button("🧠 Get Text Answer"):
-        if not question.strip():
+        if not question:
             st.warning("Please enter a question.")
         else:
-            with st.spinner("Thinking..."):
-                answer = generate_text_answer(df, question)
+            with st.spinner("Analyzing..."):
+                prompt = build_prompt(question)
+                answer = ask_gpt(prompt)
                 st.markdown(
-                    """
-                    <div style="border:1px solid #ccc; padding:12px; border-radius:8px; background-color:#f9f9f9">
-                    <strong>💡 Answer:</strong><br>
-                    {}</div>
-                    """.format(answer), unsafe_allow_html=True)
-
+                    f"<div style='padding:15px; background:#f9f9f9; border-radius:8px;'>" 
+                    f"<strong>Answer:</strong><br>{answer}</div>",
+                    unsafe_allow_html=True
+                )
 with col2:
     if st.button("📊 Create Chart"):
-        if not question.strip():
-            st.warning("Please enter a question for the chart.")
+        if not question:
+            st.warning("Please enter a question first.")
         else:
             with st.spinner("Generating chart..."):
-                generate_chart(df, question)
+                plot_metric(question)
