@@ -33,9 +33,6 @@ if df.empty:
     st.error("Failed to load dataset. Please check the CSV URL.")
     st.stop()
 
-# --- Precompute Summaries (optional for context) ---
-top_by_units = df.groupby('product_name')['units_reimbursed'].sum().sort_values(ascending=False).head(10)
-
 # --- Prepare Column Enum ---
 COLUMN_LIST = df.columns.tolist()
 
@@ -44,20 +41,16 @@ COLUMN_LIST = df.columns.tolist()
 def count_unique(column: str) -> int:
     return int(df[column].nunique())
 
-
 def sum_column(column: str) -> float:
     return float(df[column].sum())
-
 
 def top_n(column: str, n: int) -> dict:
     series = df.groupby('product_name')[column].sum().sort_values(ascending=False).head(n)
     return series.to_dict()
 
-
 def bottom_n(column: str, n: int) -> dict:
     series = df.groupby('product_name')[column].sum().sort_values(ascending=True).head(n)
     return series.to_dict()
-
 
 def sum_by_product(column: str) -> dict:
     series = df.groupby('product_name')[column].sum().sort_values(ascending=False)
@@ -69,28 +62,16 @@ functions = [
         "description": "Count unique values in a column",
         "parameters": {
             "type": "object",
-            "properties": {
-                "column": {
-                    "type": "string",
-                    "enum": COLUMN_LIST,
-                    "description": "Column name to count unique values"
-                }
-            },
+            "properties": {"column": {"type": "string","enum": COLUMN_LIST}},
             "required": ["column"]
         }
     },
     {
         "name": "sum_column",
-        "description": "Sum all values in a numeric column",
+        "description": "Sum values in a numeric column",
         "parameters": {
             "type": "object",
-            "properties": {
-                "column": {
-                    "type": "string",
-                    "enum": COLUMN_LIST,
-                    "description": "Numeric column to sum"
-                }
-            },
+            "properties": {"column": {"type": "string","enum": COLUMN_LIST}},
             "required": ["column"]
         }
     },
@@ -99,18 +80,8 @@ functions = [
         "description": "Get top N products by a numeric column",
         "parameters": {
             "type": "object",
-            "properties": {
-                "column": {
-                    "type": "string",
-                    "enum": COLUMN_LIST,
-                    "description": "Numeric column to rank"
-                },
-                "n": {
-                    "type": "integer",
-                    "description": "Number of top items to return"
-                }
-            },
-            "required": ["column", "n"]
+            "properties": {"column": {"type": "string","enum": COLUMN_LIST},"n": {"type": "integer"}},
+            "required": ["column","n"]
         }
     },
     {
@@ -118,18 +89,8 @@ functions = [
         "description": "Get bottom N products by a numeric column",
         "parameters": {
             "type": "object",
-            "properties": {
-                "column": {
-                    "type": "string",
-                    "enum": COLUMN_LIST,
-                    "description": "Numeric column to rank ascending"
-                },
-                "n": {
-                    "type": "integer",
-                    "description": "Number of bottom items to return"
-                }
-            },
-            "required": ["column", "n"]
+            "properties": {"column": {"type": "string","enum": COLUMN_LIST},"n": {"type": "integer"}},
+            "required": ["column","n"]
         }
     },
     {
@@ -137,13 +98,7 @@ functions = [
         "description": "Sum a numeric column for each product",
         "parameters": {
             "type": "object",
-            "properties": {
-                "column": {
-                    "type": "string",
-                    "enum": COLUMN_LIST,
-                    "description": "Numeric column to aggregate by product"
-                }
-            },
+            "properties": {"column": {"type": "string","enum": COLUMN_LIST}},
             "required": ["column"]
         }
     }
@@ -163,17 +118,17 @@ with col1:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Thinking..."):
-                response = openai.ChatCompletion.create(
+                response = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are an analytic assistant. Use function calling for precise results."},
-                        {"role": "user", "content": question}
+                        {"role": "user",   "content": question}
                     ],
                     functions=functions,
                     function_call="auto"
                 )
                 msg = response.choices[0].message
-                if msg.function_call:
+                if msg.get("function_call"):
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     try:
@@ -189,17 +144,17 @@ with col2:
             st.warning("Enter a question first.")
         else:
             with st.spinner("Charting..."):
-                response = openai.ChatCompletion.create(
+                response = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are an analytic assistant. Use function calling for chart data."},
-                        {"role": "user", "content": question}
+                        {"role": "user",   "content": question}
                     ],
                     functions=functions,
                     function_call="auto"
                 )
                 msg = response.choices[0].message
-                if msg.function_call:
+                if msg.get("function_call"):
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     try:
