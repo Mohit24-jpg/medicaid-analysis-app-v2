@@ -1,4 +1,4 @@
-# Add display mode selection at top of chat section
+# --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 display_mode = st.radio("Select display mode:", ["Both", "Chart only", "Text only"], horizontal=True)
 
@@ -28,13 +28,14 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
-                        series = pd.Series(result)
-                        if len(series) > 1 and display_mode in ["Both", "Chart only"]:
-                            fig, ax = plt.subplots(figsize=(8, 4))
-                            series.plot(kind='bar', ax=ax)
-                            ax.set_title(f"{fname} on {args.get('column', '')}")
-                            plt.xticks(rotation=30, ha='right')
-                            st.pyplot(fig)
+                        if display_mode in ["Both", "Chart only"]:
+                            series = pd.Series(result)
+                            if len(series) > 1:
+                                fig, ax = plt.subplots(figsize=(8, 4))
+                                series.plot(kind='bar', ax=ax)
+                                ax.set_title(f"{fname} on {args.get('column', '')}")
+                                plt.xticks(rotation=30, ha='right')
+                                st.pyplot(fig)
 
                         if display_mode in ["Both", "Text only"]:
                             output_lines = []
@@ -46,9 +47,17 @@ if user_input:
                             st.text("\n".join(output_lines))
                     else:
                         st.write(result)
-                    st.session_state.conversation_log.append({"question": user_input, "function": fname, "args": args, "result": result})
+                    st.session_state.conversation_log.append({
+                        "question": user_input,
+                        "function": fname,
+                        "args": args,
+                        "result": result
+                    })
                 except Exception as e:
                     st.error(f"Error: {e}")
             else:
                 st.markdown(msg.content)
-                st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
+                st.session_state.conversation_log.append({
+                    "question": user_input,
+                    "answer": msg.content
+                })
