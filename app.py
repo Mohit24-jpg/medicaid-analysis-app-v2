@@ -97,7 +97,7 @@ if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.spinner("Analyzing..."):
         try:
-            response = openai.ChatCompletion.create(
+            response = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=st.session_state.chat_history,
                 functions=functions,
