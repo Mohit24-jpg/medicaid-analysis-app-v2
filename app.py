@@ -121,7 +121,6 @@ if user_input:
                 timeout=30
             )
             msg = response.choices[0].message
-            st.session_state.chat_history.append(msg)
 
             if hasattr(msg, "function_call") and msg.function_call:
                 fname = msg.function_call.name
@@ -143,19 +142,25 @@ if user_input:
                                 ax.set_ylabel("Amount in USD")
                                 plt.xticks(rotation=30, ha='right')
                                 st.pyplot(fig)
+                                st.session_state.chat_history.append({"role": "assistant", "content": "(Chart rendered)"})
                         else:
-                            st.markdown("\n".join([
+                            formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
                                 for k, v in result.items()
-                            ]))
+                            ])
+                            st.markdown(formatted)
+                            st.session_state.chat_history.append({"role": "assistant", "content": formatted})
                     else:
                         st.write(result)
+                        st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
                 except Exception as e:
                     st.error(f"Function error: {e}")
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"Function error: {e}"})
             else:
                 if msg.content and not (hasattr(msg, "function_call") and msg.function_call):
                     st.markdown(msg.content)
                     st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
+                    st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
                 else:
                     st.warning("🤖 Assistant did not return a response. Please try rephrasing your question.")
         except Exception as e:
