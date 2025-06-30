@@ -1,13 +1,12 @@
-# Add timeout + safe fallback for chat response
-try:
-    with st.spinner("Analyzing..."):
+# ✅ Fully fixed, properly indented GPT call + function dispatch + fallback
+with st.spinner("Analyzing..."):
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=st.session_state.chat_history,
             functions=functions,
             function_call="auto",
-            timeout=30  # Add timeout to prevent hanging forever
+            timeout=30  # prevent indefinite hang
         )
         msg = response.choices[0].message
         st.session_state.chat_history.append(msg)
@@ -42,7 +41,7 @@ try:
                     "args": args,
                     "result": result
                 })
-              except Exception as e:
+            except Exception as e:
                 st.error(f"Function error: {e}")
         else:
             if msg.content:
