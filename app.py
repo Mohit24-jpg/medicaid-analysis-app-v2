@@ -1,4 +1,5 @@
 # Add timeout + safe fallback for chat response
+try:
     with st.spinner("Analyzing..."):
     try:
         response = client.chat.completions.create(
@@ -41,7 +42,7 @@
                     "args": args,
                     "result": result
                 })
-            except Exception as e:
+              except Exception as e:
                 st.error(f"Function error: {e}")
         else:
             if msg.content:
