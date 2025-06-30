@@ -4,7 +4,7 @@ import openai
 import matplotlib.pyplot as plt
 import json
 
-🛠️ Configuration
+Configuration
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 st.set_page_config(page_title="Medicaid Drug Analytics", layout="wide")
 
