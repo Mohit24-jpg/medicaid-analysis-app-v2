@@ -184,9 +184,6 @@ with col1:
 ".join(
         f"**{k.strip()}**: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"**{k.strip()}**: {v}"
         for k, v in result.items()
-    ).join(
-        f"**{k.strip()}**: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"**{k.strip()}**: {v}"
-        for k, v in result.items()
     )
     st.markdown(f"""
 <div style='background-color:#f1f3f6; padding:15px; border-radius:10px'>
