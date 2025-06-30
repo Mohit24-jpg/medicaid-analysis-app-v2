@@ -96,20 +96,13 @@ functions = [
 st.subheader("💬 Chat Interface")
 for msg in st.session_state.chat_history:
     if isinstance(msg, dict) and "role" in msg and "content" in msg:
-        bubble_color = "#f1f3f6" if msg["role"] == "user" else "#e8fce8"
-        border = "1px solid #ccc" if msg["role"] == "user" else "1px solid #aaffaa"
-        align = "flex-end" if msg["role"] == "user" else "flex-start"
-        components.html(f"""
-            <div style='display: flex; justify-content: {align}; margin: 10px 0;'>
-                <div style='background-color: {bubble_color}; padding: 10px 15px; border-radius: 10px; max-width: 70%; border: {border};'>
-                    <p style='margin: 0; font-family: sans-serif; font-size: 0.95rem;'>{msg['content']}</p>
-                </div>
-            </div>
-        """, height=60)
+        st.chat_message(msg["role"]).markdown(msg["content"])
 
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
+    st.chat_message("user").markdown(user_input)
+
     with st.spinner("Analyzing..."):
         try:
             response = client.chat.completions.create(
@@ -127,6 +120,8 @@ if user_input:
                 args = json.loads(msg.function_call.arguments)
                 try:
                     result = globals()[fname](**args)
+                    st.session_state.conversation_log.append({"question": user_input, "function": fname, "args": args, "result": result})
+
                     if isinstance(result, dict):
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
                             series = pd.Series(result)
@@ -139,20 +134,22 @@ if user_input:
                                 ax.set_xlabel("Drug Name")
                                 ax.set_ylabel("Amount in USD")
                                 plt.xticks(rotation=30, ha='right')
-                                st.pyplot(fig)
+                                with st.chat_message("assistant"):
+                                    st.pyplot(fig)
                         else:
-                            output_lines = []
-                            for k, v in result.items():
-                                if isinstance(v, (int, float)) and v > 1000:
-                                    output_lines.append(f"{k.strip()}: ${v:,.2f}")
-                                else:
-                                    output_lines.append(f"{k.strip()}: {v}")
-                            st.text("\n".join(output_lines))
+                            with st.chat_message("assistant"):
+                                output_lines = []
+                                for k, v in result.items():
+                                    if isinstance(v, (int, float)) and v > 1000:
+                                        output_lines.append(f"{k.strip()}: ${v:,.2f}")
+                                    else:
+                                        output_lines.append(f"{k.strip()}: {v}")
+                                st.markdown("\n".join(output_lines))
                     else:
-                        st.write(result)
-                    st.session_state.conversation_log.append({"question": user_input, "function": fname, "args": args, "result": result})
+                        with st.chat_message("assistant"):
+                            st.write(result)
                 except Exception as e:
-                    st.error(f"Function error: {e}")
+                    st.chat_message("assistant").error(f"Function error: {e}")
             else:
                 if msg.content and not (hasattr(msg, "function_call") and msg.function_call):
                     st.chat_message("assistant").markdown(msg.content)
