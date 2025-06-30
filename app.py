@@ -5,36 +5,38 @@ import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 
+st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- UI Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
-# --- Load Data ---
 CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
 df = pd.read_csv(CSV_URL)
 df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
-for col in ['units_reimbursed', 'number_of_prescriptions', 'total_amount_reimbursed', 'medicaid_amount_reimbursed', 'non_medicaid_amount_reimbursed']:
-    if col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-COLUMN_LIST = df.columns.tolist()
-st.subheader("📊 Sample of the dataset")
-st.dataframe(df.head(10))
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [
-        {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
-    ]
-
+# Correct the smart mapping
 SMART_COLUMN_MAP = {
     "spending": "total_amount_reimbursed",
     "cost": "total_amount_reimbursed",
     "reimbursement": "medicaid_amount_reimbursed",
     "prescriptions": "number_of_prescriptions",
+    "prescription_count": "number_of_prescriptions",
     "units": "units_reimbursed"
 }
+
+for col in ['units_reimbursed', 'number_of_prescriptions', 'total_amount_reimbursed', 'medicaid_amount_reimbursed', 'non_medicaid_amount_reimbursed']:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+COLUMN_LIST = df.columns.tolist()
+st.subheader("📊 Sample of the dataset")
+st.dataframe(df.head(10), use_container_width=True)
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [
+        {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
+    ]
 
 def resolve_column(col_name: str) -> str:
     col_name = col_name.lower().strip()
