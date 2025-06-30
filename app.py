@@ -12,7 +12,7 @@ st.set_page_config(page_title="Medicaid Drug Analytics", layout="wide")
 
 # --- UI Header ---
 st.image(
-    "https://github.com/Mohit24-jpg/medicaid-analysis-app-v2/blob/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png",
+    "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/main/assets/logo.png",
     width=150
 )
 st.title("💊 Medicaid Drug Spending NLP Analytics")
