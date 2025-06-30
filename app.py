@@ -2,9 +2,13 @@ import streamlit as st
 import pandas as pd
 import openai
 from openai import OpenAI
+from openai import OpenAI
 import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
+
+# --- OpenAI Client Initialization ---
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Ensure session is ready
 if "chat_history" not in st.session_state:
