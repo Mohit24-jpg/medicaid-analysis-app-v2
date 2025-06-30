@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import openai
+from openai import OpenAI
 import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 import io
 
 # --- Configuration ---
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 st.set_page_config(page_title="Medicaid Drug Analytics", layout="wide")
 
 # --- UI Header ---
@@ -15,7 +16,6 @@ st.image(
     "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png",
     width=150
 )
-
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask natural language questions about drug spending, reimbursement, and utilization directly from the dataset.")
 
@@ -163,7 +163,7 @@ with col1:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Thinking..."):
-                response = openai.ChatCompletion.create(
+                response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": "You're a data analyst. Use function calling to return correct structured results."},
@@ -193,7 +193,7 @@ with col2:
             st.warning("Enter a question first.")
         else:
             with st.spinner("Generating chart..."):
-                response = openai.ChatCompletion.create(
+                response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": "You're a chart analyst. Use function calling to fetch numerical chart data."},
@@ -231,7 +231,7 @@ You are a Medicaid data analyst. Based on the following column names and 100 sam
 Columns: {list(df.columns)}
 Sample Rows (JSON): {json.dumps(preview)}
 """
-        summary_response = openai.ChatCompletion.create(
+        summary_response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a data summarization expert."},
