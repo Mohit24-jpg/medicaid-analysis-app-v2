@@ -180,19 +180,15 @@ with col1:
                         result = globals()[fname](**args)
                         st.markdown(f"📌 Result from `{fname}`:")
                         if isinstance(result, dict):
-    formatted_result = "
-".join(
-        f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
-        for k, v in result.items()
-    )
-    st.markdown(
-        f"""
-        <div style='background-color:#f1f3f6; padding:15px; border-radius:10px'>
-        {formatted_result}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    formatted_result = ""
+    for k, v in result.items():
+        if isinstance(v, (int, float)) and v > 1000:
+            formatted_result += f"{k.strip()}: ${v:,.2f}
+"
+        else:
+            formatted_result += f"{k.strip()}: {v}
+"
+    st.text(formatted_result)
 else:
     st.write(result)
 
