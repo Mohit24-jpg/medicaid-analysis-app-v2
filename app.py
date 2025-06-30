@@ -179,7 +179,19 @@ with col1:
                     try:
                         result = globals()[fname](**args)
                         st.markdown(f"📌 Result from `{fname}`:")
-                        st.json(result)
+                        if isinstance(result, dict):
+    formatted_result = "
+".join(
+        f"**{k.strip()}**: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"**{k.strip()}**: {v}"
+        for k, v in result.items()
+    )
+    st.markdown(f"""
+<div style='background-color:#f1f3f6; padding:15px; border-radius:10px'>
+{formatted_result}
+</div>
+""", unsafe_allow_html=True)
+else:
+    st.write(result)
                         st.session_state.conversation_log.append({"question": question, "function": fname, "args": args, "result": result})
                     except Exception as e:
                         st.error(f"Error: {e}")
