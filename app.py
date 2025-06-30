@@ -180,14 +180,14 @@ with col1:
                         result = globals()[fname](**args)
                         st.markdown(f"📌 Result from `{fname}`:")
                         if isinstance(result, dict):
-    formatted_result = ""
+    formatted_result_lines = []
     for k, v in result.items():
         if isinstance(v, (int, float)) and v > 1000:
-            formatted_result += f"{k.strip()}: ${v:,.2f}
-"
+            formatted_result_lines.append(f"{k.strip()}: ${v:,.2f}")
         else:
-            formatted_result += f"{k.strip()}: {v}
-"
+            formatted_result_lines.append(f"{k.strip()}: {v}")
+    formatted_result = "
+".join(formatted_result_lines)
     st.text(formatted_result)
 else:
     st.write(result)
