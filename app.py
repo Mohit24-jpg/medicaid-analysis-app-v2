@@ -1,5 +1,5 @@
 # Add timeout + safe fallback for chat response
-with st.spinner("Analyzing..."):
+    with st.spinner("Analyzing..."):
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
