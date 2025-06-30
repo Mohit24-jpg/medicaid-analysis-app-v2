@@ -1,5 +1,5 @@
-# Optimize drug name normalization + remove display mode logic
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import openai
 from openai import OpenAI
@@ -96,13 +96,20 @@ functions = [
 st.subheader("💬 Chat Interface")
 for msg in st.session_state.chat_history:
     if isinstance(msg, dict) and "role" in msg and "content" in msg:
-        st.chat_message(msg["role"]).markdown(msg["content"])
+        bubble_color = "#f1f3f6" if msg["role"] == "user" else "#e8fce8"
+        border = "1px solid #ccc" if msg["role"] == "user" else "1px solid #aaffaa"
+        align = "flex-end" if msg["role"] == "user" else "flex-start"
+        components.html(f"""
+            <div style='display: flex; justify-content: {align}; margin: 10px 0;'>
+                <div style='background-color: {bubble_color}; padding: 10px 15px; border-radius: 10px; max-width: 70%; border: {border};'>
+                    <p style='margin: 0; font-family: sans-serif; font-size: 0.95rem;'>{msg['content']}</p>
+                </div>
+            </div>
+        """, height=60)
 
-user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending' or follow up with context")
+user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
-    st.chat_message("user").markdown(user_input)
-
     with st.spinner("Analyzing..."):
         try:
             response = client.chat.completions.create(
@@ -121,7 +128,7 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
-                        if "chart" in user_input.lower():
+                        if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
                             series = pd.Series(result)
                             if len(series) > 1:
                                 fig, ax = plt.subplots(figsize=(8, 4))
