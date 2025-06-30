@@ -1,5 +1,6 @@
 # ✅ Fully fixed, properly indented GPT call + function dispatch + fallback
-with st.spinner("Analyzing..."):
+if True:
+    with st.spinner("Analyzing..."):
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
