@@ -94,15 +94,23 @@ functions = [
 ]
 
 st.subheader("💬 Chat Interface")
-for msg in st.session_state.chat_history:
-    if isinstance(msg, dict) and "role" in msg and "content" in msg:
-        st.chat_message(msg["role"]).markdown(msg["content"])
+with st.container():
+    chat_box = """<div style='height: 400px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;'>"""
+    for msg in st.session_state.chat_history:
+        if isinstance(msg, dict) and "role" in msg and "content" in msg:
+            bubble_color = "#e8fce8" if msg["role"] == "assistant" else "#f1f3f6"
+            chat_box += f"""
+                <div style='margin-bottom: 8px; text-align: {'right' if msg['role'] == 'user' else 'left'};'>
+                    <div style='display: inline-block; background-color: {bubble_color}; padding: 8px 12px; border-radius: 10px; max-width: 70%;'>
+                        <span style='font-family: sans-serif; font-size: 0.9rem;'>{msg['content']}</span>
+                    </div>
+                </div>"""
+    chat_box += "</div>"
+    components.html(chat_box, height=420, scrolling=False)
 
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
-    st.chat_message("user").markdown(user_input)
-
     with st.spinner("Analyzing..."):
         try:
             response = client.chat.completions.create(
@@ -130,29 +138,23 @@ if user_input:
                                 series.plot(kind='bar', ax=ax)
                                 for i, (label, value) in enumerate(series.items()):
                                     ax.text(i, value, f"${value:,.0f}", ha='center', va='bottom', fontsize=9)
-                                ax.set_title(f"{fname.replace('_', ' ').title()} for {resolve_column(args.get('column', ''))}")
+                                ax.set_title(user_input.strip().capitalize())
                                 ax.set_xlabel("Drug Name")
                                 ax.set_ylabel("Amount in USD")
                                 plt.xticks(rotation=30, ha='right')
-                                with st.chat_message("assistant"):
-                                    st.pyplot(fig)
+                                st.pyplot(fig)
                         else:
-                            with st.chat_message("assistant"):
-                                output_lines = []
-                                for k, v in result.items():
-                                    if isinstance(v, (int, float)) and v > 1000:
-                                        output_lines.append(f"{k.strip()}: ${v:,.2f}")
-                                    else:
-                                        output_lines.append(f"{k.strip()}: {v}")
-                                st.markdown("\n".join(output_lines))
+                            st.markdown("\n".join([
+                                f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
+                                for k, v in result.items()
+                            ]))
                     else:
-                        with st.chat_message("assistant"):
-                            st.write(result)
+                        st.write(result)
                 except Exception as e:
-                    st.chat_message("assistant").error(f"Function error: {e}")
+                    st.error(f"Function error: {e}")
             else:
                 if msg.content and not (hasattr(msg, "function_call") and msg.function_call):
-                    st.chat_message("assistant").markdown(msg.content)
+                    st.markdown(msg.content)
                     st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
                 else:
                     st.warning("🤖 Assistant did not return a response. Please try rephrasing your question.")
