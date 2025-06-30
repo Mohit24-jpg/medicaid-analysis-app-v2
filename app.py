@@ -1,3 +1,4 @@
+# Optimize drug name normalization + remove display mode logic
 import streamlit as st
 import pandas as pd
 import openai
@@ -10,10 +11,7 @@ from difflib import get_close_matches
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # --- UI Header and Data Preview ---
-st.image(
-    "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png",
-    width=150
-)
+st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
@@ -27,7 +25,6 @@ COLUMN_LIST = df.columns.tolist()
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10))
 
-# --- Session Initialization ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
@@ -35,7 +32,6 @@ if "chat_history" not in st.session_state:
 if "conversation_log" not in st.session_state:
     st.session_state.conversation_log = []
 
-# --- Smart Column Mapping ---
 SMART_COLUMN_MAP = {
     "spending": "total_amount_reimbursed",
     "cost": "total_amount_reimbursed",
@@ -51,7 +47,17 @@ def resolve_column(col_name: str) -> str:
     matches = get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6)
     return matches[0] if matches else col_name
 
-# --- Drug Name Normalization + Functions ---
+@st.cache_data(show_spinner=False)
+def normalize_product_names():
+    name_map = {}
+    unique_names = df["product_name"].astype(str).unique().tolist()
+    for name in unique_names:
+        match = get_close_matches(name, unique_names, n=1, cutoff=0.85)
+        name_map[name] = match[0] if match else name
+    return name_map
+
+NAME_MAP = normalize_product_names()
+
 def count_unique(column: str) -> int:
     column = resolve_column(column)
     return int(df[column].nunique())
@@ -63,13 +69,7 @@ def sum_column(column: str) -> float:
 def top_n(column: str, n: int) -> dict:
     column = resolve_column(column)
     df_copy = df.copy()
-    df_copy["product_name"] = df_copy["product_name"].astype(str)
-    unique_names = df["product_name"].unique().tolist()
-    name_map = {}
-    for name in unique_names:
-        match = get_close_matches(name, unique_names, n=1, cutoff=0.85)
-        name_map[name] = match[0] if match else name
-    df_copy["product_name"] = df_copy["product_name"].map(name_map)
+    df_copy["product_name"] = df_copy["product_name"].astype(str).map(NAME_MAP)
     return df_copy.groupby("product_name")[column].sum().sort_values(ascending=False).head(n).to_dict()
 
 def bottom_n(column: str, n: int) -> dict:
@@ -84,7 +84,6 @@ def average_by_product(column: str) -> dict:
     column = resolve_column(column)
     return df.groupby("product_name")[column].mean().sort_values(ascending=False).to_dict()
 
-# --- Function Definitions for OpenAI ---
 functions = [
     {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
     {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
@@ -94,10 +93,7 @@ functions = [
     {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
-# --- Chat Interface ---
 st.subheader("💬 Chat Interface")
-display_mode = st.radio("Select display mode:", ["Both", "Chart only", "Text only"], horizontal=True)
-
 for msg in st.session_state.chat_history:
     if isinstance(msg, dict) and "role" in msg and "content" in msg:
         st.chat_message(msg["role"]).markdown(msg["content"])
@@ -125,7 +121,7 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
-                        if display_mode in ["Both", "Chart only"]:
+                        if "chart" in user_input.lower():
                             series = pd.Series(result)
                             if len(series) > 1:
                                 fig, ax = plt.subplots(figsize=(8, 4))
@@ -133,7 +129,7 @@ if user_input:
                                 ax.set_title(f"{fname} on {args.get('column', '')}")
                                 plt.xticks(rotation=30, ha='right')
                                 st.pyplot(fig)
-                        if display_mode in ["Both", "Text only"]:
+                        else:
                             output_lines = []
                             for k, v in result.items():
                                 if isinstance(v, (int, float)) and v > 1000:
@@ -143,21 +139,13 @@ if user_input:
                             st.text("\n".join(output_lines))
                     else:
                         st.write(result)
-                    st.session_state.conversation_log.append({
-                        "question": user_input,
-                        "function": fname,
-                        "args": args,
-                        "result": result
-                    })
+                    st.session_state.conversation_log.append({"question": user_input, "function": fname, "args": args, "result": result})
                 except Exception as e:
                     st.error(f"Function error: {e}")
             else:
                 if msg.content:
                     st.chat_message("assistant").markdown(msg.content)
-                    st.session_state.conversation_log.append({
-                        "question": user_input,
-                        "answer": msg.content
-                    })
+                    st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
                 else:
                     st.warning("🤖 Assistant did not return a response. Please try rephrasing your question.")
         except Exception as e:
