@@ -126,7 +126,11 @@ if user_input:
                             if len(series) > 1:
                                 fig, ax = plt.subplots(figsize=(8, 4))
                                 series.plot(kind='bar', ax=ax)
-                                ax.set_title(f"{fname} on {args.get('column', '')}")
+                                for i, (label, value) in enumerate(series.items()):
+                                    ax.text(i, value, f"${value:,.0f}", ha='center', va='bottom', fontsize=9)
+                                ax.set_title(f"{fname.replace('_', ' ').title()} for {resolve_column(args.get('column', ''))}")
+                                ax.set_xlabel("Drug Name")
+                                ax.set_ylabel("Amount in USD")
                                 plt.xticks(rotation=30, ha='right')
                                 st.pyplot(fig)
                         else:
@@ -143,7 +147,7 @@ if user_input:
                 except Exception as e:
                     st.error(f"Function error: {e}")
             else:
-                if msg.content:
+                if msg.content and not (hasattr(msg, "function_call") and msg.function_call):
                     st.chat_message("assistant").markdown(msg.content)
                     st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
                 else:
