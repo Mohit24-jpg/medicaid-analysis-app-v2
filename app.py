@@ -78,74 +78,12 @@ def average_by_product(column: str) -> dict:
 
 # --- OpenAI Function Definitions ---
 functions = [
-    {
-        "name": "count_unique",
-        "description": "Count unique values in a column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "sum_column",
-        "description": "Sum values in a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "top_n",
-        "description": "Get top N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"},
-                "n": {"type": "integer"}
-            },
-            "required": ["column", "n"]
-        }
-    },
-    {
-        "name": "bottom_n",
-        "description": "Get bottom N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"},
-                "n": {"type": "integer"}
-            },
-            "required": ["column", "n"]
-        }
-    },
-    {
-        "name": "sum_by_product",
-        "description": "Sum a numeric column for each product",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "average_by_product",
-        "description": "Calculate average of a numeric column for each product",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    }
+    {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "top_n", "description": "Get top N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "sum_by_product", "description": "Sum a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
 # --- UI Interface ---
@@ -180,18 +118,17 @@ with col1:
                         result = globals()[fname](**args)
                         st.markdown(f"📌 Result from `{fname}`:")
                         if isinstance(result, dict):
-    output_lines = []
-    for k, v in result.items():
-        if isinstance(v, (int, float)) and v > 1000:
-            output_lines.append(f"{k.strip()}: ${v:,.2f}")
-        else:
-            output_lines.append(f"{k.strip()}: {v}")
-    st.text("
-".join(output_lines))
-else:
-    st.write(result)
-
-                        st.session_state.conversation_log.append({"question": question, "function": fname, "args": args, "result": result})({"question": question, "function": fname, "args": args, "result": result})
+                            output_lines = []
+                            for k, v in result.items():
+                                if isinstance(v, (int, float)) and v > 1000:
+                                    output_lines.append(f"{k.strip()}: ${v:,.2f}")
+                                else:
+                                    output_lines.append(f"{k.strip()}: {v}")
+                            formatted_output = "\n".join(output_lines)
+                            st.text(formatted_output)
+                        else:
+                            st.write(result)
+                        st.session_state.conversation_log.append({"question": question, "function": fname, "args": args, "result": result})
                     except Exception as e:
                         st.error(f"Error: {e}")
                 else:
