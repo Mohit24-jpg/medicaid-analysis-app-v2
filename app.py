@@ -1,20 +1,18 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import openai
-from openai import OpenAI
 import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 
-# --- OpenAI Client Initialization ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- UI Header and Data Preview ---
+# --- UI Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
+# --- Load Data ---
 CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
 df = pd.read_csv(CSV_URL)
 df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
@@ -29,8 +27,6 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
     ]
-if "conversation_log" not in st.session_state:
-    st.session_state.conversation_log = []
 
 SMART_COLUMN_MAP = {
     "spending": "total_amount_reimbursed",
@@ -106,7 +102,7 @@ with st.container():
                     </div>
                 </div>"""
     chat_box += "</div>"
-    components.html(chat_box, height=420, scrolling=False)
+    st.components.v1.html(chat_box, height=420, scrolling=False)
 
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 if user_input:
@@ -127,8 +123,6 @@ if user_input:
                 args = json.loads(msg.function_call.arguments)
                 try:
                     result = globals()[fname](**args)
-                    st.session_state.conversation_log.append({"question": user_input, "function": fname, "args": args, "result": result})
-
                     if isinstance(result, dict):
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
                             series = pd.Series(result)
@@ -148,20 +142,13 @@ if user_input:
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
                                 for k, v in result.items()
                             ])
-                            st.markdown(formatted)
                             st.session_state.chat_history.append({"role": "assistant", "content": formatted})
                     else:
-                        st.write(result)
                         st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
                 except Exception as e:
-                    st.error(f"Function error: {e}")
                     st.session_state.chat_history.append({"role": "assistant", "content": f"Function error: {e}"})
             else:
-                if msg.content and not (hasattr(msg, "function_call") and msg.function_call):
-                    st.markdown(msg.content)
-                    st.session_state.conversation_log.append({"question": user_input, "answer": msg.content})
+                if msg.content:
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
-                else:
-                    st.warning("🤖 Assistant did not return a response. Please try rephrasing your question.")
         except Exception as e:
-            st.error(f"Chat request failed: {e}")
+            st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
