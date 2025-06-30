@@ -226,7 +226,7 @@ with st.expander("🧠 Generate GPT-Powered Data Summary"):
         st.info("Analyzing dataset and sending to GPT...")
         preview = df.head(100).to_dict(orient="records")
         summary_prompt = f"""
-You are a Medicaid data analyst. Based on the following column names and 100 sample rows, summarize the dataset's purpose, column meanings, and any patterns you notice.
+You are a Medicaid data analyst. Based on the following column names and 100 sample rows, summarize only the patterns you notice in the data.
 
 Columns: {list(df.columns)}
 Sample Rows (JSON): {json.dumps(preview)}
