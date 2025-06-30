@@ -1,3 +1,9 @@
+# --- Chat History Setup ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [
+        {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
+    ]
+
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 display_mode = st.radio("Select display mode:", ["Both", "Chart only", "Text only"], horizontal=True)
