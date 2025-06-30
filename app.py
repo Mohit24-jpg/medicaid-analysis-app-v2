@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- UI Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
@@ -90,26 +90,14 @@ functions = [
 ]
 
 st.subheader("💬 Chat Interface")
-with st.container():
-    chat_box = """<div style='height: 400px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;'>"""
-    for msg in st.session_state.chat_history:
-        if isinstance(msg, dict) and "role" in msg and "content" in msg:
-            bubble_color = "#e8fce8" if msg["role"] == "assistant" else "#f1f3f6"
-            chat_box += f"""
-                <div style='margin-bottom: 8px; text-align: {'right' if msg['role'] == 'user' else 'left'};'>
-                    <div style='display: inline-block; background-color: {bubble_color}; padding: 8px 12px; border-radius: 10px; max-width: 70%;'>
-                        <span style='font-family: sans-serif; font-size: 0.9rem;'>{msg['content']}</span>
-                    </div>
-                </div>"""
-    chat_box += "</div>"
-    st.components.v1.html(chat_box, height=420, scrolling=False)
-
+chat_container = st.container()
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
+
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.spinner("Analyzing..."):
         try:
-            response = client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4o",
                 messages=st.session_state.chat_history,
                 functions=functions,
@@ -126,17 +114,17 @@ if user_input:
                     if isinstance(result, dict):
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
                             series = pd.Series(result)
-                            if len(series) > 1:
-                                fig, ax = plt.subplots(figsize=(8, 4))
-                                series.plot(kind='bar', ax=ax)
-                                for i, (label, value) in enumerate(series.items()):
-                                    ax.text(i, value, f"${value:,.0f}", ha='center', va='bottom', fontsize=9)
-                                ax.set_title(user_input.strip().capitalize())
-                                ax.set_xlabel("Drug Name")
-                                ax.set_ylabel("Amount in USD")
-                                plt.xticks(rotation=30, ha='right')
+                            fig, ax = plt.subplots(figsize=(8, 4))
+                            series.plot(kind='bar', ax=ax)
+                            for i, (label, value) in enumerate(series.items()):
+                                ax.text(i, value, f"${value:,.0f}", ha='center', va='bottom', fontsize=9)
+                            ax.set_title(user_input.strip().capitalize())
+                            ax.set_xlabel("Drug Name")
+                            ax.set_ylabel("Amount in USD")
+                            plt.xticks(rotation=30, ha='right')
+                            with chat_container:
                                 st.pyplot(fig)
-                                st.session_state.chat_history.append({"role": "assistant", "content": "(Chart rendered)"})
+                            st.session_state.chat_history.append({"role": "assistant", "content": "(Chart rendered)"})
                         else:
                             formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
@@ -152,3 +140,8 @@ if user_input:
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
+
+with chat_container:
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
