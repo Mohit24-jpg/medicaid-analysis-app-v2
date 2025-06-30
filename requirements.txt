@@ -7,4 +7,3 @@ fuzzywuzzy
 python-Levenshtein
 scikit-learn
 requests
-difflib
