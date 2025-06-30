@@ -1,8 +1,18 @@
-# --- Chat History Setup ---
+import streamlit as st
+import pandas as pd
+import openai
+from openai import OpenAI
+import matplotlib.pyplot as plt
+import json
+from difflib import get_close_matches
+
+# Ensure session is ready
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
     ]
+if "conversation_log" not in st.session_state:
+    st.session_state.conversation_log = []
 
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
