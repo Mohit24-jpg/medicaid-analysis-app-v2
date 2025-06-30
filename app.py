@@ -185,11 +185,14 @@ with col1:
         f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
         for k, v in result.items()
     )
-    st.markdown("""
-<div style='background-color:#f1f3f6; padding:15px; border-radius:10px'>
-""" + formatted_result + """
-</div>
-""", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style='background-color:#f1f3f6; padding:15px; border-radius:10px'>
+        {formatted_result}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 else:
     st.write(result)
 
