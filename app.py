@@ -6,6 +6,24 @@ import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 
+# --- UI Header and Data Preview ---
+st.image(
+    "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png",
+    width=150
+)
+st.title("💊 Medicaid Drug Spending NLP Analytics")
+st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
+
+CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
+df = pd.read_csv(CSV_URL)
+df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+for col in ['units_reimbursed', 'number_of_prescriptions', 'total_amount_reimbursed', 'medicaid_amount_reimbursed', 'non_medicaid_amount_reimbursed']:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+COLUMN_LIST = df.columns.tolist()
+st.subheader("📊 Sample of the dataset")
+st.dataframe(df.head(10))
+
 # --- OpenAI Client Initialization ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -18,6 +36,39 @@ if "conversation_log" not in st.session_state:
     st.session_state.conversation_log = []
 
 # --- Define Available Functions ---
+
+def resolve_column(col_name: str) -> str:
+    matches = get_close_matches(col_name.lower(), COLUMN_LIST, n=1, cutoff=0.6)
+    return matches[0] if matches else col_name
+
+def count_unique(column: str) -> int:
+    column = resolve_column(column)
+    return int(df[column].nunique())
+
+def sum_column(column: str) -> float:
+    column = resolve_column(column)
+    return float(df[column].sum())
+
+def top_n(column: str, n: int) -> dict:
+    column = resolve_column(column)
+    df_copy = df.copy()
+    df_copy["product_name"] = df_copy["product_name"].astype(str)
+    df_copy["product_name"] = df_copy["product_name"].apply(
+        lambda x: get_close_matches(x, df["product_name"].unique(), n=1, cutoff=0.8)[0] if get_close_matches(x, df["product_name"].unique(), n=1, cutoff=0.8) else x
+    )
+    return df_copy.groupby("product_name")[column].sum().sort_values(ascending=False).head(n).to_dict()
+
+def bottom_n(column: str, n: int) -> dict:
+    column = resolve_column(column)
+    return df.groupby("product_name")[column].sum().sort_values(ascending=True).head(n).to_dict()
+
+def sum_by_product(column: str) -> dict:
+    column = resolve_column(column)
+    return df.groupby("product_name")[column].sum().sort_values(ascending=False).to_dict()
+
+def average_by_product(column: str) -> dict:
+    column = resolve_column(column)
+    return df.groupby("product_name")[column].mean().sort_values(ascending=False).to_dict()
 functions = [
     {
         "name": "count_unique",
