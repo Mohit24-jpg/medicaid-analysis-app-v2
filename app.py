@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import json
 from difflib import get_close_matches
 
+# --- OpenAI Client Initialization ---
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 # --- UI Header and Data Preview ---
 st.image(
     "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png",
@@ -24,10 +27,7 @@ COLUMN_LIST = df.columns.tolist()
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10))
 
-# --- OpenAI Client Initialization ---
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-# Ensure session is ready
+# --- Session Initialization ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls where needed to return correct results."}
@@ -35,12 +35,23 @@ if "chat_history" not in st.session_state:
 if "conversation_log" not in st.session_state:
     st.session_state.conversation_log = []
 
-# --- Define Available Functions ---
+# --- Smart Column Mapping ---
+SMART_COLUMN_MAP = {
+    "spending": "total_amount_reimbursed",
+    "cost": "total_amount_reimbursed",
+    "reimbursement": "medicaid_amount_reimbursed",
+    "prescriptions": "number_of_prescriptions",
+    "units": "units_reimbursed"
+}
 
 def resolve_column(col_name: str) -> str:
-    matches = get_close_matches(col_name.lower(), COLUMN_LIST, n=1, cutoff=0.6)
+    col_name = col_name.lower().strip()
+    if col_name in SMART_COLUMN_MAP:
+        return SMART_COLUMN_MAP[col_name]
+    matches = get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6)
     return matches[0] if matches else col_name
 
+# --- Drug Name Normalization + Functions ---
 def count_unique(column: str) -> int:
     column = resolve_column(column)
     return int(df[column].nunique())
@@ -53,9 +64,12 @@ def top_n(column: str, n: int) -> dict:
     column = resolve_column(column)
     df_copy = df.copy()
     df_copy["product_name"] = df_copy["product_name"].astype(str)
-    df_copy["product_name"] = df_copy["product_name"].apply(
-        lambda x: get_close_matches(x, df["product_name"].unique(), n=1, cutoff=0.8)[0] if get_close_matches(x, df["product_name"].unique(), n=1, cutoff=0.8) else x
-    )
+    unique_names = df["product_name"].unique().tolist()
+    name_map = {}
+    for name in unique_names:
+        match = get_close_matches(name, unique_names, n=1, cutoff=0.85)
+        name_map[name] = match[0] if match else name
+    df_copy["product_name"] = df_copy["product_name"].map(name_map)
     return df_copy.groupby("product_name")[column].sum().sort_values(ascending=False).head(n).to_dict()
 
 def bottom_n(column: str, n: int) -> dict:
@@ -69,75 +83,15 @@ def sum_by_product(column: str) -> dict:
 def average_by_product(column: str) -> dict:
     column = resolve_column(column)
     return df.groupby("product_name")[column].mean().sort_values(ascending=False).to_dict()
+
+# --- Function Definitions for OpenAI ---
 functions = [
-    {
-        "name": "count_unique",
-        "description": "Count unique values in a column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "sum_column",
-        "description": "Sum values in a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "top_n",
-        "description": "Get top N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"},
-                "n": {"type": "integer"}
-            },
-            "required": ["column", "n"]
-        }
-    },
-    {
-        "name": "bottom_n",
-        "description": "Get bottom N products by a numeric column",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"},
-                "n": {"type": "integer"}
-            },
-            "required": ["column", "n"]
-        }
-    },
-    {
-        "name": "sum_by_product",
-        "description": "Sum a numeric column for each product",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    },
-    {
-        "name": "average_by_product",
-        "description": "Calculate average of a numeric column for each product",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "string"}
-            },
-            "required": ["column"]
-        }
-    }
+    {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "top_n", "description": "Get top N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "sum_by_product", "description": "Sum a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
 # --- Chat Interface ---
@@ -197,8 +151,9 @@ if user_input:
             except Exception as e:
                 st.error(f"Error: {e}")
         else:
-            st.chat_message("assistant").markdown(msg.content)
-            st.session_state.conversation_log.append({
-                "question": user_input,
-                "answer": msg.content
-            })
+            if msg.content:
+                st.chat_message("assistant").markdown(msg.content)
+                st.session_state.conversation_log.append({
+                    "question": user_input,
+                    "answer": msg.content
+                })
