@@ -12,7 +12,7 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS and JavaScript ---
-# FIX: Re-introduced clipboard styles and a stable JavaScript implementation.
+# FIX: Updated the JavaScript function to be more robust and read from a data attribute.
 st.markdown("""
     <style>
     .user-msg {
@@ -79,20 +79,18 @@ st.markdown("""
     </style>
     
     <script>
-    function copyToClipboard(text, iconId) {
+    function copyToClipboard(element) {
+        const textToCopy = element.getAttribute('data-copytext');
         const tempTextArea = document.createElement('textarea');
-        tempTextArea.value = text;
+        tempTextArea.value = textToCopy;
         document.body.appendChild(tempTextArea);
         tempTextArea.select();
         document.execCommand('copy');
         document.body.removeChild(tempTextArea);
         
-        const icon = document.getElementById(iconId);
-        if (icon) {
-            const originalText = icon.innerHTML;
-            icon.innerHTML = '✅'; // Checkmark to show success
-            setTimeout(() => { icon.innerHTML = originalText; }, 1000); // Revert after 1 second
-        }
+        const originalText = element.innerHTML;
+        element.innerHTML = '✅'; // Checkmark to show success
+        setTimeout(() => { element.innerHTML = originalText; }, 1000); // Revert after 1 second
     }
     </script>
 """, unsafe_allow_html=True)
@@ -234,14 +232,13 @@ for i, msg in enumerate(st.session_state.chat_history):
                 html_content = content.replace("\n", "<br>")
                 text_to_copy = content
 
-            # FIX: Use json.dumps to safely escape the text for the JavaScript function call.
-            escaped_text = json.dumps(text_to_copy)
-            icon_id = f"icon-{i}"
+            # FIX: Use a data attribute to store the text, which is safer than embedding in the onclick call.
+            escaped_text = html.escape(text_to_copy, quote=True)
             
             chat_container.markdown(f"""
             <div class="assistant-msg-container">
                 <div class="assistant-msg">{html_content}</div>
-                <span id="{icon_id}" class="clipboard-icon" onclick='copyToClipboard({escaped_text}, "{icon_id}")'>📋</span>
+                <span class="clipboard-icon" data-copytext="{escaped_text}" onclick='copyToClipboard(this)'>📋</span>
             </div>
             """, unsafe_allow_html=True)
 
