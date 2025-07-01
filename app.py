@@ -136,7 +136,7 @@ functions = [
     {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
-st.subheader("\ud83d\udcca Sample of the dataset")
+st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
@@ -197,7 +197,7 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-st.subheader("\ud83d\udcac Chat Interface")
+st.subheader("💬 Chat Interface")
 st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
 for msg in st.session_state.chat_history:
     if msg["role"] == "user":
