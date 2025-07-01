@@ -132,6 +132,9 @@ functions = [
     {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
+st.subheader("📊 Sample of the dataset")
+st.dataframe(df.head(10), use_container_width=True)
+
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 
 if user_input:
@@ -162,8 +165,7 @@ if user_input:
                             fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
                         else:
-                            formatted = "\n"
-".join([
+                            formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
                                 for k, v in result.items()
                             ])
@@ -184,40 +186,11 @@ if user_input:
                     st.session_state.chat_history.append({"role": "assistant", "content": fig})
                 except Exception as fallback_error:
                     st.session_state.chat_history.append({"role": "assistant", "content": f"Fallback error: {fallback_error}"})
-            except Exception as fallback_error:
-                st.session_state.chat_history.append({"role": "assistant", "content": f"Fallback error: {fallback_error}"})
-                fname = msg.function_call.name
-                args = json.loads(msg.function_call.arguments)
-                try:
-                    result = globals()[fname](**args)
-                    if isinstance(result, dict):
-                        if any(word in user_input.lower() for word in ["chart", "visual", "bar", "graph"]):
-                            chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
-                            chart_df.reset_index(inplace=True)
-                            chart_df.columns = ["Drug", "Value"]
-                            fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title=user_input.strip().capitalize())
-                            fig.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
-                            fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
-                            st.session_state.chat_history.append({"role": "assistant", "content": fig})
-                        else:
-                            formatted = "\n".join([
-                                f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
-                                for k, v in result.items()
-                            ])
-                            st.session_state.chat_history.append({"role": "assistant", "content": formatted})
-                    else:
-                        st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
-                except Exception as e:
-                    st.session_state.chat_history.append({"role": "assistant", "content": f"Function error: {e}"})
             elif msg.content:
                 st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-st.subheader("📊 Sample of the dataset")
-st.dataframe(df.head(10), use_container_width=True)
-
-# Now render chat history
 st.subheader("💬 Chat Interface")
 st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
 for msg in st.session_state.chat_history:
