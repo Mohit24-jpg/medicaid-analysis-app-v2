@@ -12,7 +12,6 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
-# FIX: Re-introduced CSS for chat bubbles to restore the interactive look.
 st.markdown("""
     <style>
     .user-msg {
@@ -175,8 +174,6 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# FIX: Use st.container(height=...) to create a reliable, scrollable container.
-# Then, inside the container, use st.markdown with custom divs to get the chat bubble styling.
 chat_container = st.container(height=550)
 
 for i, msg in enumerate(st.session_state.chat_history):
@@ -189,10 +186,8 @@ for i, msg in enumerate(st.session_state.chat_history):
         chat_container.markdown(f'<div class="user-msg">{content}</div>', unsafe_allow_html=True)
     else: # Assistant
         if hasattr(content, 'to_plotly_json'):
-            # Render charts directly inside the container
             chat_container.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
         else:
-            # Render text and tables inside the styled div
             html_content = ""
             if isinstance(content, pd.DataFrame):
                 html_content = content.to_html(classes='dataframe', border=0, index=False)
@@ -241,19 +236,23 @@ if user_input:
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
                         chart_title = args.get("title", default_title)
-                        marker_color = args.get("color", "blue") # Default to blue
+                        marker_color = args.get("color", "blue")
 
                         fig = None
                         if chart_type == 'pie':
                             fig = px.pie(chart_df, names="Product", values="Value", title=chart_title)
+                            # FIX: Pie charts don't have a single 'marker_color'. 
+                            # We could apply a sequence, but for now, we'll just not apply the single color to avoid the error.
                         elif chart_type == 'line':
                             fig = px.line(chart_df, x="Product", y="Value", title=chart_title, markers=True)
+                            if marker_color:
+                                fig.update_traces(marker_color=marker_color)
                         else: # Default to bar
                             fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
                             fig.update_traces(textangle=0, textposition='outside')
+                            if marker_color:
+                                fig.update_traces(marker_color=marker_color)
 
-                        if marker_color and fig:
-                            fig.update_traces(marker_color=marker_color)
                         if fig:
                             fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
