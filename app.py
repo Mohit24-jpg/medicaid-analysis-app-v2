@@ -12,7 +12,6 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
-# FIX: Added styles for the clipboard functionality.
 st.markdown("""
     <style>
     .user-msg {
@@ -207,7 +206,6 @@ for i, msg in enumerate(st.session_state.chat_history):
         if hasattr(content, 'to_plotly_json'):
             chat_container.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
         else:
-            # FIX: Wrap text-based messages in a container to position the clipboard icon.
             html_content = ""
             text_to_copy = ""
             if isinstance(content, pd.DataFrame):
@@ -217,14 +215,12 @@ for i, msg in enumerate(st.session_state.chat_history):
                 html_content = content.replace("\n", "<br>")
                 text_to_copy = content
 
-            # Using a unique ID for each message for the clipboard functionality
             message_id = f"msg-{i}"
             
-            # JavaScript to handle the copy action
             js_code = f"""
             <script>
             function copyToClipboard_{message_id}() {{
-                const textToCopy = `{text_to_copy.replace('`', '\\`')}`; // Escape backticks in the text
+                const textToCopy = `{text_to_copy.replace('`', '\\`')}`;
                 const tempTextArea = document.createElement('textarea');
                 tempTextArea.value = textToCopy;
                 document.body.appendChild(tempTextArea);
@@ -232,7 +228,6 @@ for i, msg in enumerate(st.session_state.chat_history):
                 document.execCommand('copy');
                 document.body.removeChild(tempTextArea);
                 
-                // Optional: Show a "Copied!" message
                 const icon = document.getElementById('icon_{message_id}');
                 const original_text = icon.innerHTML;
                 icon.innerHTML = '✅';
@@ -333,7 +328,15 @@ if user_input:
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
                     elif result_is_dict:
-                        formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
+                        # FIX: Dynamically format the text output based on the requested column.
+                        requested_column = args.get("column", "")
+                        is_currency = "amount" in requested_column or "spending" in requested_column
+
+                        if is_currency:
+                            formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
+                        else:
+                            formatted_str = "\n".join([f"- **{k.strip()}**: {int(v):,}" for k, v in result.items()])
+                        
                         st.session_state.chat_history.append({"role": "assistant", "content": formatted_str})
                     else:
                         st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
