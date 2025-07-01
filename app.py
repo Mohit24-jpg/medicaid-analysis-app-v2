@@ -12,7 +12,8 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 # (e.g., in secrets.toml: OPENAI_API_KEY = "sk-...")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Custom CSS and JavaScript ---
+# --- Custom CSS Styling ---
+# FIX: Re-introduced CSS for chat bubbles.
 st.markdown("""
     <style>
     .user-msg {
@@ -21,17 +22,11 @@ st.markdown("""
         padding: 12px 16px;
         border-radius: 18px 18px 0 18px;
         margin: 8px 0;
-        text-align: right;
+        text-align: left; /* User messages are typically left-aligned in chat UIs */
         font-size: 1.0rem;
         width: fit-content;
-        margin-left: auto;
+        margin-left: auto; /* This will align the bubble to the right */
         max-width: 75%;
-    }
-    .assistant-msg-container {
-        position: relative;
-        width: fit-content;
-        margin-right: auto;
-        max-width: 95%;
     }
     .assistant-msg {
         background-color: #f1f1f1;
@@ -41,41 +36,9 @@ st.markdown("""
         margin: 8px 0;
         text-align: left;
         font-size: 1.0rem;
-    }
-    /* FIX: Added a wrapper for charts to apply a border */
-    .chart-wrapper {
-        border: 1px solid #000;
-        border-radius: 12px;
-        padding: 10px;
-        margin: 8px 0;
-    }
-    .clipboard-icon {
-        position: absolute;
-        top: 10px;
-        right: -30px; /* Position to the right of the bubble */
-        cursor: pointer;
-        opacity: 0; /* Hidden by default */
-        transition: opacity 0.2s;
-        font-size: 16px;
-    }
-    .assistant-msg-container:hover .clipboard-icon {
-        opacity: 0.7; /* Show on hover */
-    }
-    .clipboard-icon:hover {
-        opacity: 1;
-    }
-    .dataframe {
-        width: 100%;
-        border-collapse: collapse;
-        text-align: left;
-        margin-top: 10px;
-    }
-    .dataframe th, .dataframe td {
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-    }
-    .dataframe th {
-        background-color: #f8f9fa;
+        width: fit-content;
+        margin-right: auto;
+        max-width: 95%; 
     }
     .credit {
         margin-top: 30px;
@@ -84,43 +47,6 @@ st.markdown("""
         text-align: center;
     }
     </style>
-    
-    <script>
-    // FIX: More robust clipboard function
-    function copyToClipboard(element) {
-        const textToCopy = element.getAttribute('data-copytext');
-        if (!textToCopy) {
-            console.error("No text to copy.");
-            return; 
-        }
-        
-        // Use the modern clipboard API if available, as it's more secure
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = element.innerHTML;
-                element.innerHTML = '✅';
-                setTimeout(() => { element.innerHTML = originalText; }, 1000);
-            }).catch(err => {
-                console.error('Failed to copy with modern API:', err);
-            });
-        } else {
-            // Fallback for older browsers
-            const tempTextArea = document.createElement('textarea');
-            tempTextArea.value = textToCopy;
-            document.body.appendChild(tempTextArea);
-            tempTextArea.select();
-            try {
-                document.execCommand('copy');
-                const originalText = element.innerHTML;
-                element.innerHTML = '✅';
-                setTimeout(() => { element.innerHTML = originalText; }, 1000);
-            } catch (err) {
-                console.error('Failed to copy with fallback API:', err);
-            }
-            document.body.removeChild(tempTextArea);
-        }
-    }
-    </script>
 """, unsafe_allow_html=True)
 
 # --- Header ---
@@ -237,6 +163,8 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
+# FIX: Use st.container(height=...) for a stable scrollable area,
+# and then use st.markdown with custom divs inside for the bubble styling.
 chat_container = st.container(height=550)
 
 for i, msg in enumerate(st.session_state.chat_history):
@@ -245,33 +173,16 @@ for i, msg in enumerate(st.session_state.chat_history):
     
     content = msg["content"]
     
-    if msg["role"] == "user":
-        chat_container.markdown(f'<div class="user-msg">{content}</div>', unsafe_allow_html=True)
-    else: # Assistant
+    # Use the native chat_message for the avatar and alignment, but custom HTML for the bubble.
+    with chat_container.chat_message(name=msg["role"]):
         if hasattr(content, 'to_plotly_json'):
-            # FIX: Wrap chart in a div to apply the border style
-            with chat_container.container():
-                 st.markdown('<div class="chart-wrapper">', unsafe_allow_html=True)
-                 st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-                 st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            html_content = ""
-            text_to_copy = ""
-            if isinstance(content, pd.DataFrame):
-                html_content = content.to_html(classes='dataframe', border=0, index=False)
-                text_to_copy = content.to_csv(index=False)
-            elif isinstance(content, str):
-                html_content = content.replace("\n", "<br>")
-                text_to_copy = content
-
-            escaped_text = html.escape(text_to_copy, quote=True)
-            
-            chat_container.markdown(f"""
-            <div class="assistant-msg-container">
-                <div class="assistant-msg">{html_content}</div>
-                <span class="clipboard-icon" data-copytext="{escaped_text}" onclick='copyToClipboard(this)'>📋</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+        elif isinstance(content, pd.DataFrame):
+            st.dataframe(content, use_container_width=True)
+        elif isinstance(content, str):
+            # Apply the custom bubble class based on the role
+            role_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
+            st.markdown(f'<div class="{role_class}">{content.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
 
 # The chat input is defined here, and Streamlit docks it to the bottom of the page.
@@ -343,7 +254,6 @@ if user_input:
                             fig.update_traces(textangle=0, textposition='outside')
 
                         if fig:
-                            # FIX: Add a top margin to prevent title overlap.
                             fig.update_layout(
                                 title={
                                     'text': chart_title,
@@ -352,7 +262,7 @@ if user_input:
                                     'xanchor': 'center',
                                     'yanchor': 'top'
                                 },
-                                margin=dict(t=80, b=80, l=80, r=80), # Add margin around the chart
+                                margin=dict(t=80, b=80, l=80, r=80),
                                 xaxis_title="Product", 
                                 yaxis_title=y_axis_title
                             )
