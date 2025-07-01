@@ -12,19 +12,9 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
+# FIX: Removed the complex CSS for the container as we now use a native Streamlit feature.
 st.markdown("""
     <style>
-    /* This class is applied to the div that wraps the chat history container */
-    .chat-history-wrapper {
-        height: 550px;
-        overflow-y: scroll;
-        padding: 1rem;
-        background-color: #ffffff;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        margin-bottom: 1rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    }
     .credit {
         margin-top: 30px;
         font-size: 0.9rem;
@@ -70,7 +60,6 @@ COLUMN_LIST = df.columns.tolist()
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
-        # FIX: Strengthened the system prompt to prevent hallucinated answers.
         {"role": "system", "content": """
         You are a helpful Medicaid data analyst assistant.
         - You MUST use the provided functions to answer any questions about the data. Do not invent answers.
@@ -149,28 +138,24 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# FIX: Use a combination of st.markdown for the wrapper div and st.container for the content
-# to ensure styling and functionality work together.
-st.markdown('<div class="chat-history-wrapper">', unsafe_allow_html=True)
-chat_container = st.container()
+# FIX: Use st.container(height=...) to create a reliable, scrollable container.
+# This is the modern, recommended way to handle this in Streamlit.
+chat_container = st.container(height=550)
 
-with chat_container:
-    for i, msg in enumerate(st.session_state.chat_history):
-        if msg["role"] == "system":
-            continue
-        
-        with st.chat_message(msg["role"]):
-            content = msg["content"]
-            if hasattr(content, 'to_plotly_json'):
-                st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-            elif isinstance(content, pd.DataFrame):
-                st.dataframe(content, use_container_width=True)
-            elif isinstance(content, str):
-                st.markdown(content, unsafe_allow_html=True)
+for i, msg in enumerate(st.session_state.chat_history):
+    if msg["role"] == "system":
+        continue
+    
+    with chat_container.chat_message(msg["role"]):
+        content = msg["content"]
+        if hasattr(content, 'to_plotly_json'):
+            st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+        elif isinstance(content, pd.DataFrame):
+            st.dataframe(content, use_container_width=True)
+        elif isinstance(content, str):
+            st.markdown(content, unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-# The chat input is defined here, and Streamlit docks it to the bottom.
+# The chat input is defined here, and Streamlit docks it to the bottom of the page.
 user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
 
 if user_input:
