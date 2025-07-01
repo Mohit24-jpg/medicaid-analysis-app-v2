@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import openai
-import matplotlib.pyplot as plt
 import plotly.express as px
 import json
 from difflib import get_close_matches
@@ -11,30 +10,33 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.markdown("""
     <style>
-    .chat-scroll-area {
+    .chat-scroll {
         max-height: 500px;
         overflow-y: auto;
         padding: 1rem;
+        background-color: #f9f9f9;
+        border-radius: 8px;
         border: 1px solid #ddd;
-        background-color: #ffffff;
-        border-radius: 10px;
-        box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.05);
     }
-    .user-bubble {
-        background-color: #e6f3ff;
-        color: #000;
+    .user-msg {
+        background-color: #d1e7ff;
         padding: 10px;
         border-radius: 10px;
-        margin-bottom: 8px;
+        margin: 5px 0;
         text-align: right;
     }
-    .assistant-bubble {
-        background-color: #f0f2f6;
-        color: #000;
+    .assistant-msg {
+        background-color: #eeeeee;
         padding: 10px;
         border-radius: 10px;
-        margin-bottom: 8px;
+        margin: 5px 0;
         text-align: left;
+    }
+    .credit {
+        margin-top: 30px;
+        font-size: 0.9rem;
+        color: #888;
+        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -167,12 +169,14 @@ if user_input:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
 with st.container():
-    st.markdown('<div class="chat-scroll-area">', unsafe_allow_html=True)
+    st.markdown('<div class="chat-scroll">', unsafe_allow_html=True)
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f'<div class="user-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
         elif isinstance(msg["content"], px.bar().__class__):
             st.plotly_chart(msg["content"], use_container_width=True)
         else:
-            st.markdown(f'<div class="assistant-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
