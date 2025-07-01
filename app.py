@@ -5,10 +5,11 @@ import plotly.express as px
 import json
 from difflib import get_close_matches
 
+# --- Page and API Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# NOTE: No changes to CSS, so it's omitted for brevity.
+# --- Custom CSS Styling ---
 st.markdown("""
     <style>
     .chat-box-container {
@@ -54,45 +55,52 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- Header ---
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
+# --- Data Loading and Caching ---
 @st.cache_data
 def load_data():
+    """Loads, cleans, and caches the dataset."""
     CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
-    for col in ["units_reimbursed", "number_of_prescriptions", "total_amount_reimbursed", "medicaid_amount_reimbursed", "non_medicaid_amount_reimbursed"]:
+    numeric_cols = [
+        "units_reimbursed", "number_of_prescriptions", "total_amount_reimbursed",
+        "medicaid_amount_reimbursed", "non_medicaid_amount_reimbursed"
+    ]
+    for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
 df = load_data()
 
-
+# --- Column Name Mapping and Normalization ---
 SMART_COLUMN_MAP = {
     "spending": "total_amount_reimbursed",
     "cost": "total_amount_reimbursed",
     "reimbursement": "medicaid_amount_reimbursed",
     "prescriptions": "number_of_prescriptions",
     "prescription_count": "number_of_prescriptions",
-    "prescribed_amount": "number_of_prescriptions",
-    "script_count": "number_of_prescriptions",
-    "total_reimbursement": "total_amount_reimbursed",
     "units": "units_reimbursed"
 }
-
 COLUMN_LIST = df.columns.tolist()
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
-        # --- CHANGE 1: Updated system prompt ---
-        # The AI is now instructed to use the 'display_as_chart' parameter.
-        {"role": "system", "content": "You are a Medicaid data analyst assistant. When a user asks for a visualization (like a chart, graph, or plot), you must set the 'display_as_chart' parameter to true in your function call. Otherwise, return the data for a text-based summary."}
+        {"role": "system", "content": """
+        You are a Medicaid data analyst assistant.
+        - When a user asks for a visual (chart, graph, plot), you must set the 'display_as_chart' parameter to true.
+        - When a user asks for a table, you must set the 'display_as_table' parameter to true.
+        - Otherwise, return data for a text summary.
+        """}
     ]
 
 def resolve_column(col_name: str) -> str:
+    """Finds the correct column name from user input."""
     col_name = col_name.lower().strip()
     if col_name in SMART_COLUMN_MAP:
         return SMART_COLUMN_MAP[col_name]
@@ -101,6 +109,7 @@ def resolve_column(col_name: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def normalize_product_names():
+    """Groups similar product names together."""
     name_map = {}
     unique_names = df["product_name"].astype(str).unique().tolist()
     for name in unique_names:
@@ -110,16 +119,13 @@ def normalize_product_names():
 
 NAME_MAP = normalize_product_names()
 
-# --- CHANGE 3: Modified Python Functions ---
-# Added **kwargs to each function so they don't crash when the AI passes
-# the extra 'display_as_chart' parameter.
+# --- Data Analysis Functions (for AI) ---
+# **kwargs is added to accept new parameters without crashing.
 def count_unique(column: str, **kwargs) -> int:
-    column = resolve_column(column)
-    return int(df[column].nunique())
+    return int(df[resolve_column(column)].nunique())
 
 def sum_column(column: str, **kwargs) -> float:
-    column = resolve_column(column)
-    return float(df[column].sum())
+    return float(df[resolve_column(column)].sum())
 
 def top_n(column: str, n: int, **kwargs) -> dict:
     column = resolve_column(column)
@@ -132,48 +138,38 @@ def bottom_n(column: str, n: int, **kwargs) -> dict:
     return df.groupby("product_name")[column].sum().sort_values(ascending=True).head(n).to_dict()
 
 def sum_by_product(column: str, **kwargs) -> dict:
-    column = resolve_column(column)
-    return df.groupby("product_name")[column].sum().sort_values(ascending=False).to_dict()
+    return df.groupby("product_name")[resolve_column(column)].sum().sort_values(ascending=False).to_dict()
 
 def average_by_product(column: str, **kwargs) -> dict:
-    column = resolve_column(column)
-    return df.groupby("product_name")[column].mean().sort_values(ascending=False).to_dict()
+    return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
-
-# --- CHANGE 2: Enhanced Function Definitions ---
-# Added an optional 'display_as_chart' boolean parameter to all functions
-# that can return chartable data.
-CHARTABLE_FUNC_PROPERTIES = {
-    "display_as_chart": {
-        "type": "boolean",
-        "description": "Set to true if the user's request implies a visual chart or graph."
-    }
+# --- AI Function Definitions ---
+# Defines how the AI can request data and specify the output format (chart or table).
+OUTPUT_FORMAT_PROPERTIES = {
+    "display_as_chart": {"type": "boolean", "description": "Set to true for a visual chart."},
+    "display_as_table": {"type": "boolean", "description": "Set to true for a data table."}
 }
 
 functions = [
-    {"name": "count_unique", "description": "Count unique values in a column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
-    {"name": "sum_column", "description": "Sum values in a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
-    {"name": "top_n", "description": "Get top N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}, **CHARTABLE_FUNC_PROPERTIES}, "required": ["column", "n"]}},
-    {"name": "bottom_n", "description": "Get bottom N products by a numeric column", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}, **CHARTABLE_FUNC_PROPERTIES}, "required": ["column", "n"]}},
-    {"name": "sum_by_product", "description": "Sum a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, **CHARTABLE_FUNC_PROPERTIES}, "required": ["column"]}},
-    {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, **CHARTABLE_FUNC_PROPERTIES}, "required": ["column"]}}
+    {"name": "count_unique", "description": "Count unique values in a column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "sum_column", "description": "Sum values in a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
+    {"name": "top_n", "description": "Get top N products by a column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}, **OUTPUT_FORMAT_PROPERTIES}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}, **OUTPUT_FORMAT_PROPERTIES}, "required": ["column", "n"]}},
+    {"name": "sum_by_product", "description": "Sum a column for each product.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, **OUTPUT_FORMAT_PROPERTIES}, "required": ["column"]}},
+    {"name": "average_by_product", "description": "Calculate the average of a column for each product.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, **OUTPUT_FORMAT_PROPERTIES}, "required": ["column"]}}
 ]
 
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
-user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
+# --- Main Chat Logic ---
+user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-    messages_for_gpt = []
-    for msg in st.session_state.chat_history:
-        # Exclude previous charts from being sent to the API
-        if msg["role"] in ["user", "system"]:
-            messages_for_gpt.append({"role": msg["role"], "content": msg["content"]})
-        elif msg["role"] == "assistant" and isinstance(msg["content"], str):
-            messages_for_gpt.append({"role": "assistant", "content": msg["content"]})
+    # Prepare messages for the API, excluding non-string content like charts
+    messages_for_gpt = [msg for msg in st.session_state.chat_history if isinstance(msg.get("content"), str)]
 
     with st.spinner("Analyzing..."):
         try:
@@ -189,35 +185,32 @@ if user_input:
             if hasattr(msg, "function_call") and msg.function_call:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
+
                 try:
                     result = globals()[fname](**args)
+                    result_is_dict = isinstance(result, dict)
 
-                    # --- CHANGE 4: Revised Main Logic ---
-                    # The decision to chart is now based on the 'display_as_chart'
-                    # parameter passed by the AI model.
-                    if isinstance(result, dict) and args.get("display_as_chart", False):
-                        chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
-                        chart_df.reset_index(inplace=True)
-                        chart_df.columns = ["Product", "Value"] # More generic column names
-                        
-                        # Determine a smart title and axis label
+                    # AI requested a table
+                    if result_is_dict and args.get("display_as_table"):
+                        table_df = pd.DataFrame(list(result.items()), columns=["Product", "Value"])
+                        st.session_state.chat_history.append({"role": "assistant", "content": table_df})
+
+                    # AI requested a chart
+                    elif result_is_dict and args.get("display_as_chart"):
+                        chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"]).reset_index()
+                        chart_df.columns = ["Product", "Value"]
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         chart_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
-                        
-                        fig = px.bar(chart_df, x="Product", y="Value", text="Value", title=chart_title)
+                        fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text="Value")
                         fig.update_traces(texttemplate='$%{text:,.2s}', textposition='outside')
                         fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
                         st.session_state.chat_history.append({"role": "assistant", "content": fig})
-                    
-                    elif isinstance(result, dict):
-                        # Format dictionary as a nice string
-                        formatted = "\n".join([
-                            f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
-                            for k, v in result.items()
-                        ])
-                        st.session_state.chat_history.append({"role": "assistant", "content": formatted})
+
+                    # Default to text output
+                    elif result_is_dict:
+                        formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
+                        st.session_state.chat_history.append({"role": "assistant", "content": formatted_str})
                     else:
-                        # Handle single values (from sum, count, etc.)
                         st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
 
                 except Exception as e:
@@ -228,19 +221,23 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-# Display chat history (no changes here)
+# --- Display Chat History ---
 st.subheader("💬 Chat Interface")
 st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
-for msg in st.session_state.chat_history:
+
+for i, msg in enumerate(st.session_state.chat_history):
     if msg["role"] == "user":
         st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-    elif msg.get("role") == "assistant":
-        # Check if content is a Plotly figure
-        if hasattr(msg["content"], 'to_plotly_json'):
-            st.plotly_chart(msg["content"], use_container_width=True)
-        # Check if content is a string
-        elif isinstance(msg["content"], str):
-            st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+    elif msg["role"] == "assistant":
+        content = msg["content"]
+        if hasattr(content, 'to_plotly_json'):
+            # FIX: Add a unique key to each chart to prevent ID conflicts.
+            st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+        elif isinstance(content, pd.DataFrame):
+            st.dataframe(content, use_container_width=True)
+        elif isinstance(content, str):
+            st.markdown(f'<div class="assistant-msg">{content}</div>', unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
+```
