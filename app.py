@@ -4,7 +4,7 @@ import openai
 import plotly.express as px
 import json
 from difflib import get_close_matches
-import html # FIX: Added the missing import for the 'html' module.
+import html 
 
 # --- Page and API Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
@@ -81,6 +81,7 @@ st.markdown("""
     <script>
     function copyToClipboard(element) {
         const textToCopy = element.getAttribute('data-copytext');
+        if (!textToCopy) return; // Do nothing if there's no text
         const tempTextArea = document.createElement('textarea');
         tempTextArea.value = textToCopy;
         document.body.appendChild(tempTextArea);
@@ -311,14 +312,16 @@ if user_input:
                             fig.update_traces(textangle=0, textposition='outside')
 
                         if fig:
+                            # FIX: Add a top margin to prevent title overlap.
                             fig.update_layout(
                                 title={
                                     'text': chart_title,
-                                    'y':0.9,
+                                    'y':0.95,
                                     'x':0.5,
                                     'xanchor': 'center',
                                     'yanchor': 'top'
                                 },
+                                margin=dict(t=100), # Add top margin
                                 xaxis_title="Product", 
                                 yaxis_title=y_axis_title
                             )
