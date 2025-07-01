@@ -148,6 +148,21 @@ if user_input:
             msg = response.choices[0].message
 
             if hasattr(msg, "function_call") and msg.function_call:
+            pass  # already handled below
+        elif not msg.function_call and any(kw in user_input.lower() for kw in ["top", "chart", "graph", "show"]):
+            # Manually call top_n if GPT fails to call a function
+            try:
+                fallback_result = top_n("total_amount_reimbursed", 5)
+                chart_df = pd.DataFrame.from_dict(fallback_result, orient='index', columns=["Value"])
+                chart_df.reset_index(inplace=True)
+                chart_df.columns = ["Drug", "Value"]
+                fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title="Top 5 Drugs by Spending")
+                fig.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
+                fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
+                st.session_state.chat_history.append({"role": "assistant", "content": fig})
+                continue
+            except Exception as fallback_error:
+                st.session_state.chat_history.append({"role": "assistant", "content": f"Fallback error: {fallback_error}"})
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 try:
