@@ -60,16 +60,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Header ---
-# FIX: Removed Markdown formatting from the URL string.
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
-st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
+st.markdown("#### Ask questions and customize visualizations with natural language.")
 
 # --- Data Loading and Caching ---
 @st.cache_data
 def load_data():
     """Loads, cleans, and caches the dataset."""
-    # FIX: Removed Markdown formatting from the URL string.
     CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
@@ -99,8 +97,10 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": """
         You are a Medicaid data analyst assistant.
-        - When a user asks for a visual (chart, graph, plot), you must set the 'display_as_chart' parameter to true.
-        - When a user asks for a table, you must set the 'display_as_table' parameter to true.
+        - When a user asks for a visual (chart, graph, plot), you MUST set 'display_as_chart' to true.
+        - When a user asks for a table, you MUST set 'display_as_table' to true.
+        - Listen for customization requests like chart type (bar, pie, line), colors, or titles, and pass them as parameters.
+        - For tables, if the user specifies column labels, pass them in the 'column_labels' parameter.
         - Otherwise, return data for a text summary.
         """}
     ]
@@ -149,9 +149,14 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
+# EDIT: Added extensive customization options for charts and tables.
 OUTPUT_FORMAT_PROPERTIES = {
     "display_as_chart": {"type": "boolean", "description": "Set to true for a visual chart."},
-    "display_as_table": {"type": "boolean", "description": "Set to true for a data table."}
+    "display_as_table": {"type": "boolean", "description": "Set to true for a data table."},
+    "chart_type": {"type": "string", "enum": ["bar", "pie", "line"], "description": "The type of chart to display."},
+    "title": {"type": "string", "description": "A custom title for the chart or table."},
+    "color": {"type": "string", "description": "A specific color for the chart markers (e.g., 'blue', '#FF5733')."},
+    "column_labels": {"type": "array", "items": {"type": "string"}, "description": "Custom labels for table columns, e.g., ['Drug Name', 'Total Sales']"}
 }
 
 functions = [
@@ -167,7 +172,7 @@ st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
 # --- Main Chat Logic ---
-user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
+user_input = st.chat_input("Ask a question, e.g., 'Show me a blue pie chart for the top 5 drugs by spending'")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -193,20 +198,41 @@ if user_input:
                     result = globals()[fname](**args)
                     result_is_dict = isinstance(result, dict)
 
+                    # --- Logic for Table Display ---
                     if result_is_dict and args.get("display_as_table"):
-                        table_df = pd.DataFrame(list(result.items()), columns=["Product", "Value"])
+                        custom_labels = args.get("column_labels", ["Product", "Value"])
+                        table_df = pd.DataFrame(list(result.items()), columns=custom_labels)
                         st.session_state.chat_history.append({"role": "assistant", "content": table_df})
 
+                    # --- Logic for Chart Display ---
                     elif result_is_dict and args.get("display_as_chart"):
                         chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"]).reset_index()
                         chart_df.columns = ["Product", "Value"]
+                        
+                        # Get customization from AI or use defaults
+                        chart_type = args.get("chart_type", "bar")
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
-                        chart_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
-                        fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
-                        fig.update_traces(textangle=0, textposition='outside', marker_color='#007bff')
-                        fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
-                        st.session_state.chat_history.append({"role": "assistant", "content": fig})
+                        default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
+                        chart_title = args.get("title", default_title)
+                        marker_color = args.get("color") # Can be None
 
+                        fig = None
+                        if chart_type == 'pie':
+                            fig = px.pie(chart_df, names="Product", values="Value", title=chart_title)
+                        elif chart_type == 'line':
+                            fig = px.line(chart_df, x="Product", y="Value", title=chart_title, markers=True)
+                        else: # Default to bar chart
+                            fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
+                            fig.update_traces(textangle=0, textposition='outside')
+
+                        # Apply universal customizations
+                        if marker_color and fig:
+                            fig.update_traces(marker_color=marker_color)
+                        if fig:
+                            fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
+                            st.session_state.chat_history.append({"role": "assistant", "content": fig})
+
+                    # --- Logic for Text Display ---
                     elif result_is_dict:
                         formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": formatted_str})
@@ -229,7 +255,7 @@ with chat_container:
     st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
     for i, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "system":
-            continue # Don't display the system prompt
+            continue
         if msg["role"] == "user":
             st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
         elif msg["role"] == "assistant":
