@@ -7,18 +7,20 @@ from difflib import get_close_matches
 
 # --- Page and API Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
+# Make sure to set your OpenAI API key in Streamlit's secrets management
+# (e.g., in secrets.toml: OPENAI_API_KEY = "sk-...")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
 st.markdown("""
     <style>
     .chat-box-container {
-        max-height: 550px;
+        height: 550px; /* Use height instead of max-height for a fixed size */
         overflow-y: scroll;
         padding: 1rem;
         background-color: #ffffff;
         border-radius: 12px;
-        border: 1px solid #ccc;
+        border: 1px solid #e0e0e0;
         margin-bottom: 1rem;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
         display: flex;
@@ -27,24 +29,26 @@ st.markdown("""
     .user-msg {
         background-color: #007bff;
         color: white;
-        padding: 12px;
+        padding: 12px 16px;
         border-radius: 18px 18px 0 18px;
-        margin: 10px 0;
+        margin: 8px 0;
         text-align: right;
-        font-size: 1.05rem;
+        font-size: 1.0rem;
         width: fit-content;
         margin-left: auto;
+        max-width: 75%;
     }
     .assistant-msg {
         background-color: #f1f1f1;
         color: black;
-        padding: 12px;
+        padding: 12px 16px;
         border-radius: 18px 18px 18px 0;
-        margin: 10px 0;
+        margin: 8px 0;
         text-align: left;
-        font-size: 1.05rem;
+        font-size: 1.0rem;
         width: fit-content;
         margin-right: auto;
+        max-width: 75%;
     }
     .credit {
         margin-top: 30px;
@@ -56,7 +60,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Header ---
-st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
+st.image("[https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png](https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png)", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
@@ -64,7 +68,7 @@ st.markdown("#### Ask questions about drug spending, reimbursement, and utilizat
 @st.cache_data
 def load_data():
     """Loads, cleans, and caches the dataset."""
-    CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
+    CSV_URL = "[https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv](https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv)"
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
     numeric_cols = [
@@ -120,7 +124,6 @@ def normalize_product_names():
 NAME_MAP = normalize_product_names()
 
 # --- Data Analysis Functions (for AI) ---
-# **kwargs is added to accept new parameters without crashing.
 def count_unique(column: str, **kwargs) -> int:
     return int(df[resolve_column(column)].nunique())
 
@@ -144,7 +147,6 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
-# Defines how the AI can request data and specify the output format (chart or table).
 OUTPUT_FORMAT_PROPERTIES = {
     "display_as_chart": {"type": "boolean", "description": "Set to true for a visual chart."},
     "display_as_table": {"type": "boolean", "description": "Set to true for a data table."}
@@ -168,7 +170,6 @@ user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-    # Prepare messages for the API, excluding non-string content like charts
     messages_for_gpt = [msg for msg in st.session_state.chat_history if isinstance(msg.get("content"), str)]
 
     with st.spinner("Analyzing..."):
@@ -190,23 +191,20 @@ if user_input:
                     result = globals()[fname](**args)
                     result_is_dict = isinstance(result, dict)
 
-                    # AI requested a table
                     if result_is_dict and args.get("display_as_table"):
                         table_df = pd.DataFrame(list(result.items()), columns=["Product", "Value"])
                         st.session_state.chat_history.append({"role": "assistant", "content": table_df})
 
-                    # AI requested a chart
                     elif result_is_dict and args.get("display_as_chart"):
                         chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"]).reset_index()
                         chart_df.columns = ["Product", "Value"]
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         chart_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
-                        fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text="Value")
-                        fig.update_traces(texttemplate='$%{text:,.2s}', textposition='outside')
+                        fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
+                        fig.update_traces(textangle=0, textposition='outside', marker_color='#007bff')
                         fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
                         st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
-                    # Default to text output
                     elif result_is_dict:
                         formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": formatted_str})
@@ -223,21 +221,24 @@ if user_input:
 
 # --- Display Chat History ---
 st.subheader("💬 Chat Interface")
-st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
+chat_container = st.container()
 
-for i, msg in enumerate(st.session_state.chat_history):
-    if msg["role"] == "user":
-        st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-    elif msg["role"] == "assistant":
-        content = msg["content"]
-        if hasattr(content, 'to_plotly_json'):
-            # FIX: Add a unique key to each chart to prevent ID conflicts.
-            st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-        elif isinstance(content, pd.DataFrame):
-            st.dataframe(content, use_container_width=True)
-        elif isinstance(content, str):
-            st.markdown(f'<div class="assistant-msg">{content}</div>', unsafe_allow_html=True)
+with chat_container:
+    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
+    for i, msg in enumerate(st.session_state.chat_history):
+        if msg["role"] == "system":
+            continue # Don't display the system prompt
+        if msg["role"] == "user":
+            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+        elif msg["role"] == "assistant":
+            content = msg["content"]
+            if hasattr(content, 'to_plotly_json'):
+                st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+            elif isinstance(content, pd.DataFrame):
+                st.dataframe(content, use_container_width=True)
+            elif isinstance(content, str):
+                st.markdown(f'<div class="assistant-msg">{content}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
-```
+
