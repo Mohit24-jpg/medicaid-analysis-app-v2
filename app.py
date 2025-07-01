@@ -12,10 +12,46 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
-# FIX: Removed all custom CSS for chat bubbles and containers.
-# We will rely on native Streamlit components for a more stable UI.
+# FIX: Re-introduced CSS for chat bubbles to restore the interactive look.
 st.markdown("""
     <style>
+    .user-msg {
+        background-color: #007bff;
+        color: white;
+        padding: 12px 16px;
+        border-radius: 18px 18px 0 18px;
+        margin: 8px 0;
+        text-align: right;
+        font-size: 1.0rem;
+        width: fit-content;
+        margin-left: auto;
+        max-width: 75%;
+    }
+    .assistant-msg {
+        background-color: #f1f1f1;
+        color: black;
+        padding: 12px 16px;
+        border-radius: 18px 18px 18px 0;
+        margin: 8px 0;
+        text-align: left;
+        font-size: 1.0rem;
+        width: fit-content;
+        margin-right: auto;
+        max-width: 95%; /* Allow assistant messages (like charts) to be wider */
+    }
+    .dataframe {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        margin-top: 10px;
+    }
+    .dataframe th, .dataframe td {
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+    }
+    .dataframe th {
+        background-color: #f8f9fa;
+    }
     .credit {
         margin-top: 30px;
         font-size: 0.9rem;
@@ -140,22 +176,30 @@ st.dataframe(df.head(10), use_container_width=True)
 st.subheader("💬 Chat Interface")
 
 # FIX: Use st.container(height=...) to create a reliable, scrollable container.
-# This is the modern, recommended way to handle this in Streamlit.
+# Then, inside the container, use st.markdown with custom divs to get the chat bubble styling.
 chat_container = st.container(height=550)
 
-# Display the chat history inside the native container
 for i, msg in enumerate(st.session_state.chat_history):
     if msg["role"] == "system":
         continue
     
-    with chat_container.chat_message(msg["role"]):
-        content = msg["content"]
+    content = msg["content"]
+    
+    if msg["role"] == "user":
+        chat_container.markdown(f'<div class="user-msg">{content}</div>', unsafe_allow_html=True)
+    else: # Assistant
         if hasattr(content, 'to_plotly_json'):
-            st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-        elif isinstance(content, pd.DataFrame):
-            st.dataframe(content, use_container_width=True)
-        elif isinstance(content, str):
-            st.markdown(content, unsafe_allow_html=True)
+            # Render charts directly inside the container
+            chat_container.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+        else:
+            # Render text and tables inside the styled div
+            html_content = ""
+            if isinstance(content, pd.DataFrame):
+                html_content = content.to_html(classes='dataframe', border=0, index=False)
+            elif isinstance(content, str):
+                html_content = content.replace("\n", "<br>")
+            chat_container.markdown(f'<div class="assistant-msg">{html_content}</div>', unsafe_allow_html=True)
+
 
 # The chat input is defined here, and Streamlit docks it to the bottom of the page.
 user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
