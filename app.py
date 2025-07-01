@@ -42,6 +42,13 @@ st.markdown("""
         text-align: left;
         font-size: 1.0rem;
     }
+    /* FIX: Added a wrapper for charts to apply a border */
+    .chart-wrapper {
+        border: 1px solid #000;
+        border-radius: 12px;
+        padding: 10px;
+        margin: 8px 0;
+    }
     .clipboard-icon {
         position: absolute;
         top: 10px;
@@ -79,19 +86,39 @@ st.markdown("""
     </style>
     
     <script>
+    // FIX: More robust clipboard function
     function copyToClipboard(element) {
         const textToCopy = element.getAttribute('data-copytext');
-        if (!textToCopy) return; // Do nothing if there's no text
-        const tempTextArea = document.createElement('textarea');
-        tempTextArea.value = textToCopy;
-        document.body.appendChild(tempTextArea);
-        tempTextArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(tempTextArea);
+        if (!textToCopy) {
+            console.error("No text to copy.");
+            return; 
+        }
         
-        const originalText = element.innerHTML;
-        element.innerHTML = '✅'; // Checkmark to show success
-        setTimeout(() => { element.innerHTML = originalText; }, 1000); // Revert after 1 second
+        // Use the modern clipboard API if available, as it's more secure
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = element.innerHTML;
+                element.innerHTML = '✅';
+                setTimeout(() => { element.innerHTML = originalText; }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy with modern API:', err);
+            });
+        } else {
+            // Fallback for older browsers
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = textToCopy;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = element.innerHTML;
+                element.innerHTML = '✅';
+                setTimeout(() => { element.innerHTML = originalText; }, 1000);
+            } catch (err) {
+                console.error('Failed to copy with fallback API:', err);
+            }
+            document.body.removeChild(tempTextArea);
+        }
     }
     </script>
 """, unsafe_allow_html=True)
@@ -222,7 +249,11 @@ for i, msg in enumerate(st.session_state.chat_history):
         chat_container.markdown(f'<div class="user-msg">{content}</div>', unsafe_allow_html=True)
     else: # Assistant
         if hasattr(content, 'to_plotly_json'):
-            chat_container.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+            # FIX: Wrap chart in a div to apply the border style
+            with chat_container.container():
+                 st.markdown('<div class="chart-wrapper">', unsafe_allow_html=True)
+                 st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+                 st.markdown('</div>', unsafe_allow_html=True)
         else:
             html_content = ""
             text_to_copy = ""
@@ -316,12 +347,12 @@ if user_input:
                             fig.update_layout(
                                 title={
                                     'text': chart_title,
-                                    'y':0.95,
+                                    'y':0.9,
                                     'x':0.5,
                                     'xanchor': 'center',
                                     'yanchor': 'top'
                                 },
-                                margin=dict(t=100), # Add top margin
+                                margin=dict(t=80, b=80, l=80, r=80), # Add margin around the chart
                                 xaxis_title="Product", 
                                 yaxis_title=y_axis_title
                             )
