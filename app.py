@@ -11,8 +11,9 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 st.markdown("""
     <style>
     .chat-box-container {
-        max-height: 500px;
-        overflow-y: auto;
+        max-height: 550px;
+        overflow-y: scroll;
+        overflow-x: hidden;
         padding: 1rem;
         background-color: #ffffff;
         border-radius: 12px;
@@ -65,6 +66,9 @@ SMART_COLUMN_MAP = {
     "reimbursement": "medicaid_amount_reimbursed",
     "prescriptions": "number_of_prescriptions",
     "prescription_count": "number_of_prescriptions",
+    "prescribed_amount": "number_of_prescriptions",
+    "script_count": "number_of_prescriptions",
+    "total_reimbursement": "total_amount_reimbursed",
     "units": "units_reimbursed"
 }
 
@@ -132,7 +136,7 @@ functions = [
     {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
-st.subheader("📊 Sample of the dataset")
+st.subheader("\ud83d\udcca Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
@@ -140,7 +144,6 @@ user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-    # Build clean messages array for GPT
     messages_for_gpt = []
     for msg in st.session_state.chat_history:
         if msg["role"] in ["user", "system"]:
@@ -165,8 +168,14 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
+                        exclude_terms = [term.strip().lower() for term in user_input.lower().split() if term in result.keys() or any(term in k.lower() for k in result.keys())]
+                        filtered_result = {
+                            k: v for k, v in result.items()
+                            if not any(exclude_term in k.lower() for exclude_term in exclude_terms)
+                        } if exclude_terms else result
+
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar", "graph"]):
-                            chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
+                            chart_df = pd.DataFrame.from_dict(filtered_result, orient='index', columns=["Value"])
                             chart_df.reset_index(inplace=True)
                             chart_df.columns = ["Drug", "Value"]
                             fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title=user_input.strip().capitalize())
@@ -176,7 +185,7 @@ if user_input:
                         else:
                             formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
-                                for k, v in result.items()
+                                for k, v in filtered_result.items()
                             ])
                             st.session_state.chat_history.append({"role": "assistant", "content": formatted})
                     else:
@@ -188,7 +197,7 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-st.subheader("💬 Chat Interface")
+st.subheader("\ud83d\udcac Chat Interface")
 st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
 for msg in st.session_state.chat_history:
     if msg["role"] == "user":
