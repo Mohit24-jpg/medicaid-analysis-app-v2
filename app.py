@@ -13,13 +13,14 @@ st.markdown("""
     .chat-box-container {
         max-height: 550px;
         overflow-y: scroll;
-        overflow-x: hidden;
         padding: 1rem;
         background-color: #ffffff;
         border-radius: 12px;
         border: 1px solid #ccc;
         margin-bottom: 1rem;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        display: flex;
+        flex-direction: column;
     }
     .user-msg {
         background-color: #007bff;
