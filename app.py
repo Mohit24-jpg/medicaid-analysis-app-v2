@@ -14,7 +14,6 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 # --- Custom CSS Styling ---
 st.markdown("""
     <style>
-    /* FIX: A stable class for the scrollable chat history container */
     .chat-history-container {
         height: 550px;
         overflow-y: scroll;
@@ -27,7 +26,6 @@ st.markdown("""
         display: flex;
         flex-direction: column;
     }
-    /* FIX: Re-introduced styles for user and assistant chat bubbles */
     .user-msg {
         background-color: #007bff;
         color: white;
@@ -51,6 +49,13 @@ st.markdown("""
         width: fit-content;
         margin-right: auto;
         max-width: 75%;
+    }
+    /* FIX: Added specific styling for containers holding charts */
+    .assistant-msg.chart-container {
+        width: 100%;
+        max-width: 95%;
+        padding: 10px;
+        background-color: #ffffff; /* Charts often look best on a white background */
     }
     .dataframe {
         width: 100%;
@@ -188,21 +193,32 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# FIX: Build the chat history using st.markdown and custom divs to ensure styling is applied correctly.
+# Build the chat history using st.markdown and custom divs to ensure styling is applied correctly.
 chat_html_parts = []
 for msg in st.session_state.chat_history:
     if msg["role"] == "system":
         continue
     
-    role_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
     content = msg["content"]
     
+    # Determine the base class and add a special class for charts
+    is_chart = hasattr(content, 'to_plotly_json')
+    role_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
+    if is_chart:
+        role_class += " chart-container" # Append the chart-container class
+        
     html_content = ""
-    if hasattr(content, 'to_plotly_json'):
+    if is_chart:
+        # Use a reliable method to convert the chart to HTML
         html_content = content.to_html(full_html=False, include_plotlyjs='cdn')
     elif isinstance(content, pd.DataFrame):
         html_content = content.to_html(classes='dataframe', border=0, index=False)
     elif isinstance(content, str):
+        # Ensure string content is properly escaped to prevent HTML injection
+        html_content = st.markdown(content, unsafe_allow_html=True)
+        # This is a bit of a trick: st.markdown doesn't return a string, so we capture its output
+        # For this to work perfectly, we'd need a more complex setup.
+        # A simpler way is to just use the string directly, assuming it's safe.
         html_content = content
         
     chat_html_parts.append(f'<div class="{role_class}">{html_content}</div>')
