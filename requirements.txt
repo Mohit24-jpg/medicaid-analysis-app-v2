@@ -7,3 +7,5 @@ fuzzywuzzy
 python-Levenshtein
 scikit-learn
 requests
+plotly
+
