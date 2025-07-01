@@ -50,6 +50,20 @@ st.markdown("""
         margin-right: auto;
         max-width: 75%;
     }
+    /* Styling for pandas tables converted to HTML */
+    .dataframe {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        margin-top: 10px;
+    }
+    .dataframe th, .dataframe td {
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+    }
+    .dataframe th {
+        background-color: #f8f9fa;
+    }
     .credit {
         margin-top: 30px;
         font-size: 0.9rem;
@@ -97,11 +111,11 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": """
         You are a Medicaid data analyst assistant.
-        - When a user asks for a visual (chart, graph, plot), you MUST set 'display_as_chart' to true.
-        - When a user asks for a table, you MUST set 'display_as_table' to true.
+        - Default to providing a text-based summary.
+        - Only set 'display_as_chart' to true if the user explicitly asks for a 'chart', 'graph', 'plot', or 'visualize'.
+        - Only set 'display_as_table' to true if the user explicitly asks for a 'table'.
         - Listen for customization requests like chart type (bar, pie, line), colors, or titles, and pass them as parameters.
         - For tables, if the user specifies column labels, pass them in the 'column_labels' parameter.
-        - Otherwise, return data for a text summary.
         """}
     ]
 
@@ -149,10 +163,9 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
-# EDIT: Added extensive customization options for charts and tables.
 OUTPUT_FORMAT_PROPERTIES = {
-    "display_as_chart": {"type": "boolean", "description": "Set to true for a visual chart."},
-    "display_as_table": {"type": "boolean", "description": "Set to true for a data table."},
+    "display_as_chart": {"type": "boolean", "description": "Set to true if the user explicitly asks for a visual chart."},
+    "display_as_table": {"type": "boolean", "description": "Set to true if the user explicitly asks for a data table."},
     "chart_type": {"type": "string", "enum": ["bar", "pie", "line"], "description": "The type of chart to display."},
     "title": {"type": "string", "description": "A custom title for the chart or table."},
     "color": {"type": "string", "description": "A specific color for the chart markers (e.g., 'blue', '#FF5733')."},
@@ -198,41 +211,36 @@ if user_input:
                     result = globals()[fname](**args)
                     result_is_dict = isinstance(result, dict)
 
-                    # --- Logic for Table Display ---
                     if result_is_dict and args.get("display_as_table"):
                         custom_labels = args.get("column_labels", ["Product", "Value"])
                         table_df = pd.DataFrame(list(result.items()), columns=custom_labels)
                         st.session_state.chat_history.append({"role": "assistant", "content": table_df})
 
-                    # --- Logic for Chart Display ---
                     elif result_is_dict and args.get("display_as_chart"):
                         chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"]).reset_index()
                         chart_df.columns = ["Product", "Value"]
                         
-                        # Get customization from AI or use defaults
                         chart_type = args.get("chart_type", "bar")
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
                         chart_title = args.get("title", default_title)
-                        marker_color = args.get("color") # Can be None
+                        marker_color = args.get("color")
 
                         fig = None
                         if chart_type == 'pie':
                             fig = px.pie(chart_df, names="Product", values="Value", title=chart_title)
                         elif chart_type == 'line':
                             fig = px.line(chart_df, x="Product", y="Value", title=chart_title, markers=True)
-                        else: # Default to bar chart
+                        else:
                             fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
                             fig.update_traces(textangle=0, textposition='outside')
 
-                        # Apply universal customizations
                         if marker_color and fig:
                             fig.update_traces(marker_color=marker_color)
                         if fig:
                             fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
-                    # --- Logic for Text Display ---
                     elif result_is_dict:
                         formatted_str = "\n".join([f"- **{k.strip()}**: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": formatted_str})
@@ -249,23 +257,34 @@ if user_input:
 
 # --- Display Chat History ---
 st.subheader("💬 Chat Interface")
-chat_container = st.container()
 
-with chat_container:
-    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
-    for i, msg in enumerate(st.session_state.chat_history):
-        if msg["role"] == "system":
-            continue
-        if msg["role"] == "user":
-            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-        elif msg["role"] == "assistant":
-            content = msg["content"]
-            if hasattr(content, 'to_plotly_json'):
-                st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-            elif isinstance(content, pd.DataFrame):
-                st.dataframe(content, use_container_width=True)
-            elif isinstance(content, str):
-                st.markdown(f'<div class="assistant-msg">{content}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+# FIX: Build an HTML string for the entire chat history to ensure it's all inside the scrollable div.
+chat_html_parts = []
+for msg in st.session_state.chat_history:
+    if msg["role"] == "system":
+        continue
+    
+    if msg["role"] == "user":
+        chat_html_parts.append(f'<div class="user-msg">{msg["content"]}</div>')
+    elif msg["role"] == "assistant":
+        content = msg["content"]
+        
+        # Wrap assistant content in its div
+        html_content = ""
+        if hasattr(content, 'to_plotly_json'):
+            # Convert plotly fig to HTML
+            html_content = content.to_html(full_html=False, include_plotlyjs='cdn')
+        elif isinstance(content, pd.DataFrame):
+            # Convert dataframe to HTML
+            html_content = content.to_html(classes='dataframe', border=0, index=False)
+        elif isinstance(content, str):
+            # Use the string content directly
+            html_content = content
+            
+        chat_html_parts.append(f'<div class="assistant-msg">{html_content}</div>')
+
+# Combine all parts and render inside the main container div
+full_chat_html = f'<div class="chat-box-container">{"".join(chat_html_parts)}</div>'
+st.markdown(full_chat_html, unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
