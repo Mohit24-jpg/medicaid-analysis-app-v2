@@ -100,7 +100,7 @@ if "chat_history" not in st.session_state:
         You are a helpful Medicaid data analyst assistant.
         - You MUST use the provided functions to answer any questions about the data. Do not invent answers.
         - Default to providing a text-based summary.
-        - Only set 'display_as_chart' to true if the user explicitly asks for a 'chart', 'graph', 'plot', or 'visualize'.
+        - Only set 'display_as_chart' to true if the user explicitly asks for a 'chart', 'graph', 'plot', or 'visualize'. This includes donut, scatter, and area charts.
         - Only set 'display_as_table' to true if the user explicitly asks for a 'table'.
         - Listen for customization requests. If the user asks for a color scheme or palette (e.g., 'vibrant colors', 'use the plasma palette'), pass a valid Plotly sequential color scale name (e.g., 'Viridis', 'Plasma', 'Blues') to the `color_palette` parameter.
         """}
@@ -150,11 +150,11 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
-# FIX: Added 'color_palette' for more flexible color customization.
+# FIX: Added 'donut', 'scatter', 'area' chart types.
 OUTPUT_FORMAT_PROPERTIES = {
     "display_as_chart": {"type": "boolean", "description": "Set to true if the user explicitly asks for a visual chart."},
     "display_as_table": {"type": "boolean", "description": "Set to true if the user explicitly asks for a data table."},
-    "chart_type": {"type": "string", "enum": ["bar", "pie", "line"], "description": "The type of chart to display."},
+    "chart_type": {"type": "string", "enum": ["bar", "pie", "line", "donut", "scatter", "area"], "description": "The type of chart to display."},
     "title": {"type": "string", "description": "A custom title for the chart or table."},
     "color_palette": {"type": "string", "enum": ["Plasma", "Viridis", "Blues", "Greens", "Reds", "YlOrRd", "Spectral"], "description": "A named color palette for the chart."},
     "column_labels": {"type": "array", "items": {"type": "string"}, "description": "Custom labels for table columns, e.g., ['Drug Name', 'Total Sales']"}
@@ -238,7 +238,6 @@ if user_input:
                         default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
                         chart_title = args.get("title", default_title)
                         
-                        # FIX: Logic to handle color palettes correctly for all chart types.
                         color_palette_name = args.get("color_palette")
                         plotly_kwargs = {"title": chart_title}
                         
@@ -247,16 +246,21 @@ if user_input:
                                 color_sequence = getattr(px.colors.sequential, color_palette_name)
                                 plotly_kwargs['color_discrete_sequence'] = color_sequence
                             except AttributeError:
-                                # Fallback for invalid palette names
                                 pass
                         
                         fig = None
+                        # FIX: Added donut chart type and other chart types.
                         if chart_type == 'pie':
                             fig = px.pie(chart_df, names="Product", values="Value", **plotly_kwargs)
+                        elif chart_type == 'donut':
+                            fig = px.pie(chart_df, names="Product", values="Value", hole=0.4, **plotly_kwargs)
                         elif chart_type == 'line':
                             fig = px.line(chart_df, x="Product", y="Value", markers=True, **plotly_kwargs)
+                        elif chart_type == 'scatter':
+                            fig = px.scatter(chart_df, x="Product", y="Value", size="Value", **plotly_kwargs)
+                        elif chart_type == 'area':
+                             fig = px.area(chart_df, x="Product", y="Value", **plotly_kwargs)
                         else: # Default to bar
-                            # If no palette is specified, use a default blue color for bars.
                             if 'color_discrete_sequence' not in plotly_kwargs:
                                 plotly_kwargs['color_discrete_sequence'] = ['blue'] * len(chart_df)
                             fig = px.bar(chart_df, x="Product", y="Value", text_auto='.2s', **plotly_kwargs)
