@@ -102,7 +102,7 @@ if "chat_history" not in st.session_state:
         - Default to providing a text-based summary.
         - Only set 'display_as_chart' to true if the user explicitly asks for a 'chart', 'graph', 'plot', or 'visualize'.
         - Only set 'display_as_table' to true if the user explicitly asks for a 'table'.
-        - Listen for customization requests like chart type, colors, or titles, and pass them as parameters.
+        - Listen for customization requests. If the user asks for a color scheme or palette (e.g., 'vibrant colors', 'use the plasma palette'), pass a valid Plotly sequential color scale name (e.g., 'Viridis', 'Plasma', 'Blues') to the `color_palette` parameter.
         """}
     ]
 
@@ -150,12 +150,13 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
+# FIX: Added 'color_palette' for more flexible color customization.
 OUTPUT_FORMAT_PROPERTIES = {
     "display_as_chart": {"type": "boolean", "description": "Set to true if the user explicitly asks for a visual chart."},
     "display_as_table": {"type": "boolean", "description": "Set to true if the user explicitly asks for a data table."},
     "chart_type": {"type": "string", "enum": ["bar", "pie", "line"], "description": "The type of chart to display."},
     "title": {"type": "string", "description": "A custom title for the chart or table."},
-    "color": {"type": "string", "description": "A specific color for the chart markers (e.g., 'blue', '#FF5733')."},
+    "color_palette": {"type": "string", "enum": ["Plasma", "Viridis", "Blues", "Greens", "Reds", "YlOrRd", "Spectral"], "description": "A named color palette for the chart."},
     "column_labels": {"type": "array", "items": {"type": "string"}, "description": "Custom labels for table columns, e.g., ['Drug Name', 'Total Sales']"}
 }
 
@@ -236,22 +237,30 @@ if user_input:
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
                         chart_title = args.get("title", default_title)
-                        marker_color = args.get("color", "blue")
-
+                        
+                        # FIX: Logic to handle color palettes correctly for all chart types.
+                        color_palette_name = args.get("color_palette")
+                        plotly_kwargs = {"title": chart_title}
+                        
+                        if color_palette_name:
+                            try:
+                                color_sequence = getattr(px.colors.sequential, color_palette_name)
+                                plotly_kwargs['color_discrete_sequence'] = color_sequence
+                            except AttributeError:
+                                # Fallback for invalid palette names
+                                pass
+                        
                         fig = None
                         if chart_type == 'pie':
-                            fig = px.pie(chart_df, names="Product", values="Value", title=chart_title)
-                            # FIX: Pie charts don't have a single 'marker_color'. 
-                            # We could apply a sequence, but for now, we'll just not apply the single color to avoid the error.
+                            fig = px.pie(chart_df, names="Product", values="Value", **plotly_kwargs)
                         elif chart_type == 'line':
-                            fig = px.line(chart_df, x="Product", y="Value", title=chart_title, markers=True)
-                            if marker_color:
-                                fig.update_traces(marker_color=marker_color)
+                            fig = px.line(chart_df, x="Product", y="Value", markers=True, **plotly_kwargs)
                         else: # Default to bar
-                            fig = px.bar(chart_df, x="Product", y="Value", title=chart_title, text_auto='.2s')
+                            # If no palette is specified, use a default blue color for bars.
+                            if 'color_discrete_sequence' not in plotly_kwargs:
+                                plotly_kwargs['color_discrete_sequence'] = ['blue'] * len(chart_df)
+                            fig = px.bar(chart_df, x="Product", y="Value", text_auto='.2s', **plotly_kwargs)
                             fig.update_traces(textangle=0, textposition='outside')
-                            if marker_color:
-                                fig.update_traces(marker_color=marker_color)
 
                         if fig:
                             fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
