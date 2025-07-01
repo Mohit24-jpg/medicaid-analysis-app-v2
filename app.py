@@ -2,11 +2,26 @@ import streamlit as st
 import pandas as pd
 import openai
 import matplotlib.pyplot as plt
+import plotly.express as px
 import json
 from difflib import get_close_matches
 
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+st.markdown("""
+    <style>
+    .chat-container {
+        max-height: 500px;
+        overflow-y: auto;
+        padding: 0 1rem;
+        border: 1px solid #ccc;
+        border-radius: 10px;
+        background-color: #f9f9f9;
+    }
+    .stChatInputContainer { margin-top: 1rem !important; }
+    </style>
+""", unsafe_allow_html=True)
 
 st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
 st.title("💊 Medicaid Drug Spending NLP Analytics")
@@ -16,7 +31,6 @@ CSV_URL = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v
 df = pd.read_csv(CSV_URL)
 df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
 
-# Correct the smart mapping
 SMART_COLUMN_MAP = {
     "spending": "total_amount_reimbursed",
     "cost": "total_amount_reimbursed",
@@ -92,7 +106,6 @@ functions = [
 ]
 
 st.subheader("💬 Chat Interface")
-chat_container = st.container()
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 
 if user_input:
@@ -115,18 +128,14 @@ if user_input:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
-                            series = pd.Series(result)
-                            fig, ax = plt.subplots(figsize=(8, 4))
-                            series.plot(kind='bar', ax=ax)
-                            for i, (label, value) in enumerate(series.items()):
-                                ax.text(i, value, f"${value:,.0f}", ha='center', va='bottom', fontsize=9)
-                            ax.set_title(user_input.strip().capitalize())
-                            ax.set_xlabel("Drug Name")
-                            ax.set_ylabel("Amount in USD")
-                            plt.xticks(rotation=30, ha='right')
-                            with chat_container:
-                                st.pyplot(fig)
-                            st.session_state.chat_history.append({"role": "assistant", "content": "(Chart rendered)"})
+                            chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
+                            chart_df.reset_index(inplace=True)
+                            chart_df.columns = ["Drug", "Value"]
+                            fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title=user_input.strip().capitalize())
+                            fig.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
+                            fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
+                            st.session_state.chat_history.append({"role": "assistant", "content": "Here is the chart:"})
+                            st.session_state.chat_history.append({"role": "chart", "content": fig})
                         else:
                             formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
@@ -137,13 +146,16 @@ if user_input:
                         st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
                 except Exception as e:
                     st.session_state.chat_history.append({"role": "assistant", "content": f"Function error: {e}"})
-            else:
-                if msg.content:
-                    st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
+            elif msg.content:
+                st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-with chat_container:
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
+st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"] if msg["role"] in ["user", "assistant"] else "assistant"):
+        if msg["role"] == "chart" and hasattr(msg["content"], 'show'):
+            st.plotly_chart(msg["content"], use_container_width=True)
+        else:
             st.markdown(msg["content"])
+st.markdown('</div>', unsafe_allow_html=True)
