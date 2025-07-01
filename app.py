@@ -11,7 +11,8 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 # (e.g., in secrets.toml: OPENAI_API_KEY = "sk-...")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Custom CSS Styling ---
+# --- Custom CSS and JavaScript ---
+# FIX: Re-introduced clipboard styles and a stable JavaScript implementation.
 st.markdown("""
     <style>
     .user-msg {
@@ -76,6 +77,24 @@ st.markdown("""
         text-align: center;
     }
     </style>
+    
+    <script>
+    function copyToClipboard(text, iconId) {
+        const tempTextArea = document.createElement('textarea');
+        tempTextArea.value = text;
+        document.body.appendChild(tempTextArea);
+        tempTextArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempTextArea);
+        
+        const icon = document.getElementById(iconId);
+        if (icon) {
+            const originalText = icon.innerHTML;
+            icon.innerHTML = '✅'; // Checkmark to show success
+            setTimeout(() => { icon.innerHTML = originalText; }, 1000); // Revert after 1 second
+        }
+    }
+    </script>
 """, unsafe_allow_html=True)
 
 # --- Header ---
@@ -215,32 +234,14 @@ for i, msg in enumerate(st.session_state.chat_history):
                 html_content = content.replace("\n", "<br>")
                 text_to_copy = content
 
-            message_id = f"msg-{i}"
-            
-            js_code = f"""
-            <script>
-            function copyToClipboard_{message_id}() {{
-                const textToCopy = `{text_to_copy.replace('`', '\\`')}`;
-                const tempTextArea = document.createElement('textarea');
-                tempTextArea.value = textToCopy;
-                document.body.appendChild(tempTextArea);
-                tempTextArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(tempTextArea);
-                
-                const icon = document.getElementById('icon_{message_id}');
-                const original_text = icon.innerHTML;
-                icon.innerHTML = '✅';
-                setTimeout(() => {{ icon.innerHTML = original_text; }}, 1000);
-            }}
-            </script>
-            """
+            # FIX: Use json.dumps to safely escape the text for the JavaScript function call.
+            escaped_text = json.dumps(text_to_copy)
+            icon_id = f"icon-{i}"
             
             chat_container.markdown(f"""
             <div class="assistant-msg-container">
                 <div class="assistant-msg">{html_content}</div>
-                <span id="icon_{message_id}" class="clipboard-icon" onclick="copyToClipboard_{message_id}()">📋</span>
-                {js_code}
+                <span id="{icon_id}" class="clipboard-icon" onclick='copyToClipboard({escaped_text}, "{icon_id}")'>📋</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -328,7 +329,6 @@ if user_input:
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
                     elif result_is_dict:
-                        # FIX: Dynamically format the text output based on the requested column.
                         requested_column = args.get("column", "")
                         is_currency = "amount" in requested_column or "spending" in requested_column
 
