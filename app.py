@@ -10,13 +10,14 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.markdown("""
     <style>
-    .chat-scroll {
+    .chat-box-container {
         max-height: 500px;
-        overflow-y: auto;
+        overflow-y: scroll;
         padding: 1rem;
         background-color: #f9f9f9;
         border-radius: 8px;
         border: 1px solid #ddd;
+        margin-bottom: 1rem;
     }
     .user-msg {
         background-color: #d1e7ff;
@@ -124,6 +125,18 @@ functions = [
 ]
 
 st.subheader("💬 Chat Interface")
+
+with st.container():
+    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+        elif isinstance(msg["content"], px.bar().__class__):
+            st.plotly_chart(msg["content"], use_container_width=True)
+        else:
+            st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 
 if user_input:
@@ -145,7 +158,7 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
-                        if any(word in user_input.lower() for word in ["chart", "visual", "bar"]):
+                        if any(word in user_input.lower() for word in ["chart", "visual", "bar", "graph"]):
                             chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
                             chart_df.reset_index(inplace=True)
                             chart_df.columns = ["Drug", "Value"]
@@ -167,16 +180,5 @@ if user_input:
                 st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
-
-with st.container():
-    st.markdown('<div class="chat-scroll">', unsafe_allow_html=True)
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-        elif isinstance(msg["content"], px.bar().__class__):
-            st.plotly_chart(msg["content"], use_container_width=True)
-        else:
-            st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
