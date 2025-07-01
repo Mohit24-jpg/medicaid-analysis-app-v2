@@ -150,7 +150,6 @@ def average_by_product(column: str, **kwargs) -> dict:
     return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
 
 # --- AI Function Definitions ---
-# FIX: Added 'donut', 'scatter', 'area' chart types.
 OUTPUT_FORMAT_PROPERTIES = {
     "display_as_chart": {"type": "boolean", "description": "Set to true if the user explicitly asks for a visual chart."},
     "display_as_table": {"type": "boolean", "description": "Set to true if the user explicitly asks for a data table."},
@@ -249,7 +248,6 @@ if user_input:
                                 pass
                         
                         fig = None
-                        # FIX: Added donut chart type and other chart types.
                         if chart_type == 'pie':
                             fig = px.pie(chart_df, names="Product", values="Value", **plotly_kwargs)
                         elif chart_type == 'donut':
@@ -267,7 +265,13 @@ if user_input:
                             fig.update_traces(textangle=0, textposition='outside')
 
                         if fig:
-                            fig.update_layout(xaxis_title="Product", yaxis_title=y_axis_title)
+                            # FIX: Added layout options to center the chart title.
+                            fig.update_layout(
+                                xaxis_title="Product", 
+                                yaxis_title=y_axis_title,
+                                title_x=0.5, # Center title horizontally
+                                title_xanchor='center'
+                            )
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
                     elif result_is_dict:
