@@ -12,58 +12,10 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
-# FIX: Re-introduced CSS for chat bubbles and a stable container class.
+# FIX: Removed all custom CSS for chat bubbles and containers.
+# We will rely on native Streamlit components for a more stable UI.
 st.markdown("""
     <style>
-    .chat-history-container {
-        height: 550px;
-        overflow-y: scroll;
-        padding: 1rem;
-        background-color: #ffffff;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        margin-bottom: 1rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        display: flex;
-        flex-direction: column;
-    }
-    .user-msg {
-        background-color: #007bff;
-        color: white;
-        padding: 12px 16px;
-        border-radius: 18px 18px 0 18px;
-        margin: 8px 0;
-        text-align: right;
-        font-size: 1.0rem;
-        width: fit-content;
-        margin-left: auto;
-        max-width: 75%;
-    }
-    .assistant-msg {
-        background-color: #f1f1f1;
-        color: black;
-        padding: 12px 16px;
-        border-radius: 18px 18px 18px 0;
-        margin: 8px 0;
-        text-align: left;
-        font-size: 1.0rem;
-        width: fit-content;
-        margin-right: auto;
-        max-width: 95%; /* Allow assistant messages (like charts) to be wider */
-    }
-    .dataframe {
-        width: 100%;
-        border-collapse: collapse;
-        text-align: left;
-        margin-top: 10px;
-    }
-    .dataframe th, .dataframe td {
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-    }
-    .dataframe th {
-        background-color: #f8f9fa;
-    }
     .credit {
         margin-top: 30px;
         font-size: 0.9rem;
@@ -187,32 +139,23 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# FIX: Use a combination of st.markdown for the wrapper div and native components inside
-# to ensure styling and functionality work together.
-st.markdown('<div class="chat-history-container">', unsafe_allow_html=True)
+# FIX: Use st.container(height=...) to create a reliable, scrollable container.
+# This is the modern, recommended way to handle this in Streamlit.
+chat_container = st.container(height=550)
+
+# Display the chat history inside the native container
 for i, msg in enumerate(st.session_state.chat_history):
     if msg["role"] == "system":
         continue
     
-    role_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
-    content = msg["content"]
-    
-    if hasattr(content, 'to_plotly_json'):
-        # For charts, we render them directly using st.plotly_chart inside a container
-        with st.container():
+    with chat_container.chat_message(msg["role"]):
+        content = msg["content"]
+        if hasattr(content, 'to_plotly_json'):
             st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
-    else:
-        # For text and tables, we build the HTML string
-        html_content = ""
-        if isinstance(content, pd.DataFrame):
-            html_content = content.to_html(classes='dataframe', border=0, index=False)
+        elif isinstance(content, pd.DataFrame):
+            st.dataframe(content, use_container_width=True)
         elif isinstance(content, str):
-            html_content = content.replace("\n", "<br>") # Ensure newlines are rendered
-        
-        st.markdown(f'<div class="{role_class}">{html_content}</div>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True)
-
+            st.markdown(content, unsafe_allow_html=True)
 
 # The chat input is defined here, and Streamlit docks it to the bottom of the page.
 user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
@@ -254,8 +197,7 @@ if user_input:
                         y_axis_title = args.get("column", "Value").replace("_", " ").title()
                         default_title = f"{fname.replace('_', ' ').title()} of {y_axis_title}"
                         chart_title = args.get("title", default_title)
-                        # FIX: Default to 'blue' if no color is specified by the user.
-                        marker_color = args.get("color", "blue")
+                        marker_color = args.get("color", "blue") # Default to blue
 
                         fig = None
                         if chart_type == 'pie':
