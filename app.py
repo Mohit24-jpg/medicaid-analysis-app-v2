@@ -12,6 +12,7 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS Styling ---
+# FIX: Added styles for the clipboard functionality.
 st.markdown("""
     <style>
     .user-msg {
@@ -26,6 +27,12 @@ st.markdown("""
         margin-left: auto;
         max-width: 75%;
     }
+    .assistant-msg-container {
+        position: relative;
+        width: fit-content;
+        margin-right: auto;
+        max-width: 95%;
+    }
     .assistant-msg {
         background-color: #f1f1f1;
         color: black;
@@ -34,9 +41,21 @@ st.markdown("""
         margin: 8px 0;
         text-align: left;
         font-size: 1.0rem;
-        width: fit-content;
-        margin-right: auto;
-        max-width: 95%; /* Allow assistant messages (like charts) to be wider */
+    }
+    .clipboard-icon {
+        position: absolute;
+        top: 10px;
+        right: -30px; /* Position to the right of the bubble */
+        cursor: pointer;
+        opacity: 0; /* Hidden by default */
+        transition: opacity 0.2s;
+        font-size: 16px;
+    }
+    .assistant-msg-container:hover .clipboard-icon {
+        opacity: 0.7; /* Show on hover */
+    }
+    .clipboard-icon:hover {
+        opacity: 1;
     }
     .dataframe {
         width: 100%;
@@ -188,12 +207,47 @@ for i, msg in enumerate(st.session_state.chat_history):
         if hasattr(content, 'to_plotly_json'):
             chat_container.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
         else:
+            # FIX: Wrap text-based messages in a container to position the clipboard icon.
             html_content = ""
+            text_to_copy = ""
             if isinstance(content, pd.DataFrame):
                 html_content = content.to_html(classes='dataframe', border=0, index=False)
+                text_to_copy = content.to_csv(index=False)
             elif isinstance(content, str):
                 html_content = content.replace("\n", "<br>")
-            chat_container.markdown(f'<div class="assistant-msg">{html_content}</div>', unsafe_allow_html=True)
+                text_to_copy = content
+
+            # Using a unique ID for each message for the clipboard functionality
+            message_id = f"msg-{i}"
+            
+            # JavaScript to handle the copy action
+            js_code = f"""
+            <script>
+            function copyToClipboard_{message_id}() {{
+                const textToCopy = `{text_to_copy.replace('`', '\\`')}`; // Escape backticks in the text
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = textToCopy;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+                
+                // Optional: Show a "Copied!" message
+                const icon = document.getElementById('icon_{message_id}');
+                const original_text = icon.innerHTML;
+                icon.innerHTML = '✅';
+                setTimeout(() => {{ icon.innerHTML = original_text; }}, 1000);
+            }}
+            </script>
+            """
+            
+            chat_container.markdown(f"""
+            <div class="assistant-msg-container">
+                <div class="assistant-msg">{html_content}</div>
+                <span id="icon_{message_id}" class="clipboard-icon" onclick="copyToClipboard_{message_id}()">📋</span>
+                {js_code}
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # The chat input is defined here, and Streamlit docks it to the bottom of the page.
@@ -238,7 +292,7 @@ if user_input:
                         chart_title = args.get("title", default_title)
                         
                         color_palette_name = args.get("color_palette")
-                        plotly_kwargs = {"title": chart_title}
+                        plotly_kwargs = {}
                         
                         if color_palette_name:
                             try:
@@ -265,12 +319,16 @@ if user_input:
                             fig.update_traces(textangle=0, textposition='outside')
 
                         if fig:
-                            # FIX: Added layout options to center the chart title.
                             fig.update_layout(
+                                title={
+                                    'text': chart_title,
+                                    'y':0.9,
+                                    'x':0.5,
+                                    'xanchor': 'center',
+                                    'yanchor': 'top'
+                                },
                                 xaxis_title="Product", 
-                                yaxis_title=y_axis_title,
-                                title_x=0.5, # Center title horizontally
-                                title_xanchor='center'
+                                yaxis_title=y_axis_title
                             )
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
 
