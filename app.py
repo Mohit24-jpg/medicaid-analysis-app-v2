@@ -176,6 +176,9 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
+st.subheader("📊 Sample of the dataset")
+st.dataframe(df.head(10), use_container_width=True)
+
 # Now render chat history
 st.subheader("💬 Chat Interface")
 st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
