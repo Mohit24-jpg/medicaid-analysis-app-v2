@@ -14,7 +14,8 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 # --- Custom CSS Styling ---
 st.markdown("""
     <style>
-    .chat-history-container {
+    /* This class is applied to the div that wraps the chat history container */
+    .chat-history-wrapper {
         height: 550px;
         overflow-y: scroll;
         padding: 1rem;
@@ -23,52 +24,6 @@ st.markdown("""
         border: 1px solid #e0e0e0;
         margin-bottom: 1rem;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        display: flex;
-        flex-direction: column;
-    }
-    .user-msg {
-        background-color: #007bff;
-        color: white;
-        padding: 12px 16px;
-        border-radius: 18px 18px 0 18px;
-        margin: 8px 0;
-        text-align: right;
-        font-size: 1.0rem;
-        width: fit-content;
-        margin-left: auto;
-        max-width: 75%;
-    }
-    .assistant-msg {
-        background-color: #f1f1f1;
-        color: black;
-        padding: 12px 16px;
-        border-radius: 18px 18px 18px 0;
-        margin: 8px 0;
-        text-align: left;
-        font-size: 1.0rem;
-        width: fit-content;
-        margin-right: auto;
-        max-width: 75%;
-    }
-    /* FIX: Added specific styling for containers holding charts */
-    .assistant-msg.chart-container {
-        width: 100%;
-        max-width: 95%;
-        padding: 10px;
-        background-color: #ffffff; /* Charts often look best on a white background */
-    }
-    .dataframe {
-        width: 100%;
-        border-collapse: collapse;
-        text-align: left;
-        margin-top: 10px;
-    }
-    .dataframe th, .dataframe td {
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-    }
-    .dataframe th {
-        background-color: #f8f9fa;
     }
     .credit {
         margin-top: 30px;
@@ -115,13 +70,14 @@ COLUMN_LIST = df.columns.tolist()
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
+        # FIX: Strengthened the system prompt to prevent hallucinated answers.
         {"role": "system", "content": """
-        You are a Medicaid data analyst assistant.
+        You are a helpful Medicaid data analyst assistant.
+        - You MUST use the provided functions to answer any questions about the data. Do not invent answers.
         - Default to providing a text-based summary.
         - Only set 'display_as_chart' to true if the user explicitly asks for a 'chart', 'graph', 'plot', or 'visualize'.
         - Only set 'display_as_table' to true if the user explicitly asks for a 'table'.
-        - Listen for customization requests like chart type (bar, pie, line), colors, or titles, and pass them as parameters.
-        - For tables, if the user specifies column labels, pass them in the 'column_labels' parameter.
+        - Listen for customization requests like chart type, colors, or titles, and pass them as parameters.
         """}
     ]
 
@@ -193,39 +149,26 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# Build the chat history using st.markdown and custom divs to ensure styling is applied correctly.
-chat_html_parts = []
-for msg in st.session_state.chat_history:
-    if msg["role"] == "system":
-        continue
-    
-    content = msg["content"]
-    
-    # Determine the base class and add a special class for charts
-    is_chart = hasattr(content, 'to_plotly_json')
-    role_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
-    if is_chart:
-        role_class += " chart-container" # Append the chart-container class
-        
-    html_content = ""
-    if is_chart:
-        # Use a reliable method to convert the chart to HTML
-        html_content = content.to_html(full_html=False, include_plotlyjs='cdn')
-    elif isinstance(content, pd.DataFrame):
-        html_content = content.to_html(classes='dataframe', border=0, index=False)
-    elif isinstance(content, str):
-        # Ensure string content is properly escaped to prevent HTML injection
-        html_content = st.markdown(content, unsafe_allow_html=True)
-        # This is a bit of a trick: st.markdown doesn't return a string, so we capture its output
-        # For this to work perfectly, we'd need a more complex setup.
-        # A simpler way is to just use the string directly, assuming it's safe.
-        html_content = content
-        
-    chat_html_parts.append(f'<div class="{role_class}">{html_content}</div>')
+# FIX: Use a combination of st.markdown for the wrapper div and st.container for the content
+# to ensure styling and functionality work together.
+st.markdown('<div class="chat-history-wrapper">', unsafe_allow_html=True)
+chat_container = st.container()
 
-full_chat_html = f'<div class="chat-history-container">{"".join(chat_html_parts)}</div>'
-st.markdown(full_chat_html, unsafe_allow_html=True)
+with chat_container:
+    for i, msg in enumerate(st.session_state.chat_history):
+        if msg["role"] == "system":
+            continue
+        
+        with st.chat_message(msg["role"]):
+            content = msg["content"]
+            if hasattr(content, 'to_plotly_json'):
+                st.plotly_chart(content, use_container_width=True, key=f"chart_{i}")
+            elif isinstance(content, pd.DataFrame):
+                st.dataframe(content, use_container_width=True)
+            elif isinstance(content, str):
+                st.markdown(content, unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
 
 # The chat input is defined here, and Streamlit docks it to the bottom.
 user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
