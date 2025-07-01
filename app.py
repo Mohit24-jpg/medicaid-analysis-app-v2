@@ -198,7 +198,7 @@ for msg in st.session_state.chat_history:
         st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
     elif isinstance(msg["content"], px.bar().__class__):
         st.plotly_chart(msg["content"], use_container_width=True)
-    else:
+    elif isinstance(msg["content"], str):
         st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
