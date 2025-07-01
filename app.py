@@ -4,6 +4,7 @@ import openai
 import plotly.express as px
 import json
 from difflib import get_close_matches
+import html # FIX: Added the missing import for the 'html' module.
 
 # --- Page and API Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
@@ -12,7 +13,6 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- Custom CSS and JavaScript ---
-# FIX: Updated the JavaScript function to be more robust and read from a data attribute.
 st.markdown("""
     <style>
     .user-msg {
@@ -232,7 +232,6 @@ for i, msg in enumerate(st.session_state.chat_history):
                 html_content = content.replace("\n", "<br>")
                 text_to_copy = content
 
-            # FIX: Use a data attribute to store the text, which is safer than embedding in the onclick call.
             escaped_text = html.escape(text_to_copy, quote=True)
             
             chat_container.markdown(f"""
