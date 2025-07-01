@@ -139,11 +139,20 @@ user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
+
+    # Build clean messages array for GPT
+    messages_for_gpt = []
+    for msg in st.session_state.chat_history:
+        if msg["role"] in ["user", "system"]:
+            messages_for_gpt.append({"role": msg["role"], "content": msg["content"]})
+        elif msg["role"] == "assistant" and isinstance(msg["content"], str):
+            messages_for_gpt.append({"role": "assistant", "content": msg["content"]})
+
     with st.spinner("Analyzing..."):
         try:
             response = openai.chat.completions.create(
                 model="gpt-4o",
-                messages=st.session_state.chat_history,
+                messages=messages_for_gpt,
                 functions=functions,
                 function_call="auto",
                 timeout=30
@@ -174,18 +183,6 @@ if user_input:
                         st.session_state.chat_history.append({"role": "assistant", "content": str(result)})
                 except Exception as e:
                     st.session_state.chat_history.append({"role": "assistant", "content": f"Function error: {e}"})
-            elif not msg.function_call and any(kw in user_input.lower() for kw in ["top", "chart", "graph", "show"]):
-                try:
-                    fallback_result = top_n("total_amount_reimbursed", 5)
-                    chart_df = pd.DataFrame.from_dict(fallback_result, orient='index', columns=["Value"])
-                    chart_df.reset_index(inplace=True)
-                    chart_df.columns = ["Drug", "Value"]
-                    fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title="Top 5 Drugs by Spending")
-                    fig.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
-                    fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
-                    st.session_state.chat_history.append({"role": "assistant", "content": fig})
-                except Exception as fallback_error:
-                    st.session_state.chat_history.append({"role": "assistant", "content": f"Fallback error: {fallback_error}"})
             elif msg.content:
                 st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
