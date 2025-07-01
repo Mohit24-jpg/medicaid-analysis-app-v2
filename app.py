@@ -11,15 +11,31 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.markdown("""
     <style>
-    .chat-container {
+    .chat-scroll-area {
         max-height: 500px;
         overflow-y: auto;
-        padding: 0 1rem;
-        border: 1px solid #ccc;
+        padding: 1rem;
+        border: 1px solid #ddd;
+        background-color: #ffffff;
         border-radius: 10px;
-        background-color: #f9f9f9;
+        box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.05);
     }
-    .stChatInputContainer { margin-top: 1rem !important; }
+    .user-bubble {
+        background-color: #e6f3ff;
+        color: #000;
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        text-align: right;
+    }
+    .assistant-bubble {
+        background-color: #f0f2f6;
+        color: #000;
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        text-align: left;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -134,8 +150,7 @@ if user_input:
                             fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title=user_input.strip().capitalize())
                             fig.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
                             fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
-                            st.session_state.chat_history.append({"role": "assistant", "content": "Here is the chart:"})
-                            st.session_state.chat_history.append({"role": "chart", "content": fig})
+                            st.session_state.chat_history.append({"role": "assistant", "content": fig})
                         else:
                             formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
@@ -151,11 +166,13 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
 
-st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"] if msg["role"] in ["user", "assistant"] else "assistant"):
-        if msg["role"] == "chart" and hasattr(msg["content"], 'show'):
+with st.container():
+    st.markdown('<div class="chat-scroll-area">', unsafe_allow_html=True)
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="user-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
+        elif isinstance(msg["content"], px.bar().__class__):
             st.plotly_chart(msg["content"], use_container_width=True)
         else:
-            st.markdown(msg["content"])
-st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="assistant-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
