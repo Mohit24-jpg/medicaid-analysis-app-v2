@@ -15,7 +15,7 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 st.markdown("""
     <style>
     /* This targets the container for the chat history */
-    .chat-history-container {
+    .st-emotion-cache-1j2trn0 {
         height: 550px;
         overflow-y: scroll;
         padding: 1rem;
@@ -148,16 +148,14 @@ st.dataframe(df.head(10), use_container_width=True)
 # --- Chat Interface ---
 st.subheader("💬 Chat Interface")
 
-# FIX: Use a container with a specific class for the chat history.
-# This allows CSS to make it scrollable.
+# FIX: Use a native Streamlit container for the chat history.
+# This ensures all content is rendered correctly within the scrollable area.
 chat_history_container = st.container()
 with chat_history_container:
-    st.markdown('<div class="chat-history-container">', unsafe_allow_html=True)
     for i, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "system":
             continue
         
-        # Use Streamlit's native chat message component
         with st.chat_message(msg["role"]):
             content = msg["content"]
             if hasattr(content, 'to_plotly_json'):
@@ -166,11 +164,8 @@ with chat_history_container:
                 st.dataframe(content, use_container_width=True)
             elif isinstance(content, str):
                 st.markdown(content, unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-
-# FIX: The chat input is now defined after the history container for logical code flow.
-# Streamlit will automatically dock it to the bottom of the page.
+# The chat input is defined here, and Streamlit docks it to the bottom.
 user_input = st.chat_input("Ask a question, e.g., 'Show me a table of the top 5 drugs by spending'")
 
 if user_input:
@@ -243,6 +238,5 @@ if user_input:
     
     # Rerun the script to display the new message
     st.rerun()
-
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
