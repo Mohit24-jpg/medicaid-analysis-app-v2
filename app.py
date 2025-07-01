@@ -162,7 +162,7 @@ if user_input:
                             fig.update_layout(xaxis_title="Drug", yaxis_title="Amount in USD")
                             st.session_state.chat_history.append({"role": "assistant", "content": fig})
                         else:
-                            formatted = "
+                            formatted = "\n"
 ".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
                                 for k, v in result.items()
