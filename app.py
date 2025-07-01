@@ -68,12 +68,11 @@ SMART_COLUMN_MAP = {
     "units": "units_reimbursed"
 }
 
-for col in ['units_reimbursed', 'number_of_prescriptions', 'total_amount_reimbursed', 'medicaid_amount_reimbursed', 'non_medicaid_amount_reimbursed']:
+for col in ["units_reimbursed", "number_of_prescriptions", "total_amount_reimbursed", "medicaid_amount_reimbursed", "non_medicaid_amount_reimbursed"]:
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
 COLUMN_LIST = df.columns.tolist()
-st.subheader("📊 Sample of the dataset")
-st.dataframe(df.head(10), use_container_width=True)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
@@ -133,19 +132,6 @@ functions = [
     {"name": "average_by_product", "description": "Calculate average of a numeric column for each product", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
-st.subheader("💬 Chat Interface")
-
-with st.container():
-    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-        elif isinstance(msg["content"], px.bar().__class__):
-            st.plotly_chart(msg["content"], use_container_width=True)
-        else:
-            st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
 user_input = st.chat_input("Ask a question like 'Top 5 drugs by spending'")
 
 if user_input:
@@ -189,5 +175,17 @@ if user_input:
                 st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"Chat request failed: {e}"})
+
+# Now render chat history
+st.subheader("💬 Chat Interface")
+st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
+for msg in st.session_state.chat_history:
+    if msg["role"] == "user":
+        st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+    elif isinstance(msg["content"], px.bar().__class__):
+        st.plotly_chart(msg["content"], use_container_width=True)
+    else:
+        st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
