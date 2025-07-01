@@ -168,14 +168,8 @@ if user_input:
                 try:
                     result = globals()[fname](**args)
                     if isinstance(result, dict):
-                        exclude_terms = [term.strip().lower() for term in user_input.lower().split() if term in result.keys() or any(term in k.lower() for k in result.keys())]
-                        filtered_result = {
-                            k: v for k, v in result.items()
-                            if not any(exclude_term in k.lower() for exclude_term in exclude_terms)
-                        } if exclude_terms else result
-
                         if any(word in user_input.lower() for word in ["chart", "visual", "bar", "graph"]):
-                            chart_df = pd.DataFrame.from_dict(filtered_result, orient='index', columns=["Value"])
+                            chart_df = pd.DataFrame.from_dict(result, orient='index', columns=["Value"])
                             chart_df.reset_index(inplace=True)
                             chart_df.columns = ["Drug", "Value"]
                             fig = px.bar(chart_df, x="Drug", y="Value", text="Value", title=user_input.strip().capitalize())
@@ -185,7 +179,7 @@ if user_input:
                         else:
                             formatted = "\n".join([
                                 f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}"
-                                for k, v in filtered_result.items()
+                                for k, v in result.items()
                             ])
                             st.session_state.chat_history.append({"role": "assistant", "content": formatted})
                     else:
