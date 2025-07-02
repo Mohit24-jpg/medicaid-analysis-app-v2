@@ -103,13 +103,13 @@ if "chat_history" not in st.session_state:
     # --- NEW: Create an enhanced system prompt using the data dictionary ---
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions about this data. When asked for a specific drug, use the `get_product_stat` function."
+    outro = "\n\nUse your functions to answer questions about this data. When asked for a specific drug, use the `get_product_stat` function. For calculations like 'cost per unit', use the `get_calculated_stat` function."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
 # --- Core Data & Charting Functions ---
 def resolve_column(col_name: str) -> str:
-    col_name = col_name.lower().strip()
+    col_name = col_name.lower().strip().replace(" ", "_")
     return SMART_COLUMN_MAP.get(col_name, get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6)[0] if get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6) else col_name)
 
 def top_n(column: str, n: int) -> dict:
@@ -140,19 +140,50 @@ def get_product_stat(product_name: str, column: str, stat: str) -> str:
         stat_name = "Total"
     elif stat in ['count', 'number']:
         value = product_df[resolved_column].count()
-        return f"There are {int(value):,} entries for {actual_product_name}."
+        return f"Based on the data, there are {int(value):,} entries for {actual_product_name}."
     else:
         return f"Sorry, I can't calculate the '{stat}' for a product."
 
+    # --- FIX: Make response more descriptive ---
     if "amount" in resolved_column or "spending" in column:
-        return f"The {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
+        return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
     else:
-        return f"The {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
+        return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
+
+# --- NEW FUNCTION for calculated stats like 'cost per prescription' ---
+def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> str:
+    product_names = df['product_name'].unique()
+    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
+    
+    if not match:
+        return f"I could not find data for a product matching '{product_name}'."
+        
+    actual_product_name = match[0]
+    num_col = resolve_column(numerator)
+    den_col = resolve_column(denominator)
+    product_df = df[df['product_name'] == actual_product_name]
+
+    if product_df.empty:
+        return f"Could not find data for {actual_product_name}."
+
+    num_sum = product_df[num_col].sum()
+    den_sum = product_df[den_col].sum()
+
+    if den_sum == 0:
+        return f"Cannot calculate as the denominator ({denominator}) is zero for {actual_product_name}."
+
+    value = num_sum / den_sum
+    
+    # --- FIX: Make response more descriptive ---
+    return (f"The calculated average {numerator} per {denominator} for {actual_product_name} is ${value:,.2f}. "
+            f"(Calculated as Total {num_col.replace('_', ' ').title()} / Total {den_col.replace('_', ' ').title()})")
+
 
 functions = [
     {"name": "top_n", "description": "Get top N products by a numeric column. Use for questions like 'What are the top 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a numeric column. Use for questions like 'What are the bottom 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "get_product_stat", "description": "Get a specific statistic (like average, total, or count) for a single named product. Use for questions about one specific drug.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string", "description": "The name of the product to look up."}, "column": {"type": "string", "description": "The data column to analyze, e.g., 'spending', 'prescriptions'."}, "stat": {"type": "string", "description": "The statistic to calculate: 'average', 'total', or 'count'."}}, "required": ["product_name", "column", "stat"]}}
+    {"name": "get_product_stat", "description": "Get a specific statistic (like average, total, or count) for a single named product. Use for questions about one specific drug.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
+    {"name": "get_calculated_stat", "description": "Calculate a 'per unit' statistic for a single product, like 'cost per prescription'. Use when a question involves division or a rate.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}}
 ]
 
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
@@ -174,6 +205,7 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
 
     is_donut = 'donut' in prompt_lower or (prev_chart_type == 'donut' and 'pie' not in prompt_lower)
     
+    # --- COLOR FIX: Ensure color palette is passed to pie charts ---
     fig_map = {
         "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0),
         "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4),
@@ -236,6 +268,10 @@ if user_input:
                     result_string = get_product_stat(**args)
                     st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                 
+                elif fname == "get_calculated_stat":
+                    result_string = get_calculated_stat(**args)
+                    st.session_state.chat_history.append({"role": "assistant", "content": result_string})
+
                 elif fname in ["top_n", "bottom_n"]:
                     result = globals()[fname](**args)
                     args["func_name"] = fname
