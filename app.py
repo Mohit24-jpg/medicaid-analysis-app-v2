@@ -223,16 +223,17 @@ st.subheader("💬 Chat Interface")
 chat_container = st.container(height=600)
 
 with chat_container:
-    for msg in st.session_state.chat_history:
+    # --- ERROR FIX: Use enumerate to provide a unique key for each element ---
+    for i, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "user":
-            st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True, key=f"user_msg_{i}")
         
         elif msg["role"] == "assistant":
             if msg.get("figure"):
-                st.plotly_chart(msg["figure"], use_container_width=True)
+                st.plotly_chart(msg["figure"], use_container_width=True, key=f"chart_{i}")
             elif msg.get("content"):
                 # Don't display the hidden context message for charts
                 if not msg["content"].startswith("[Chart generated"):
-                    st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True, key=f"assistant_msg_{i}")
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
