@@ -96,37 +96,57 @@ functions = [
     {"name": "bottom_n", "description": "Get bottom N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
 ]
 
-def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
+# --- CHARTING FIX: Reworked function to handle context (previous type, title, and colors) ---
+def create_chart(data: dict, user_prompt: str, column_name: str, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
     chart_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"]).reset_index()
     chart_df.columns = ["Entity", "Value"]
     
     prompt_lower = user_prompt.lower()
-    chart_types = ["pie", "line", "scatter", "area", "funnel", "treemap"]
-    chart_type = next((t for t in chart_types if t in prompt_lower), "bar")
-
-    fig_map = {
-        "pie": px.pie(chart_df, names='Entity', values='Value'),
-        "line": px.line(chart_df, x='Entity', y='Value', markers=True),
-        "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s')
-    }
-    fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text_auto='.2s'))
     
+    # Determine chart type, using previous type as a fallback
+    chart_types = ["pie", "line", "scatter", "area", "funnel", "treemap"]
+    chart_type = next((t for t in chart_types if t in prompt_lower), prev_chart_type)
+
+    # Determine color palette
+    color_palette = None
+    if 'professional' in prompt_lower or 'corporate' in prompt_lower:
+        color_palette = px.colors.qualitative.G10
+    elif 'vibrant' in prompt_lower or 'colorful' in prompt_lower:
+        color_palette = px.colors.qualitative.Vivid
+    elif 'pastel' in prompt_lower:
+        color_palette = px.colors.qualitative.Pastel
+
+    # Create figure
+    fig_map = {
+        "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette),
+        "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette),
+        "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette)
+    }
+    fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette))
+    
+    # Single color override
+    color_match = re.search(r'\b(red|green|blue|purple|orange|yellow|pink|black)\b', prompt_lower)
+    if color_match:
+        fig.update_traces(marker_color=color_match.group(1))
+
+    # Update traces and layout
     if chart_type == 'pie':
         fig.update_traces(textinfo='percent+label', hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>(%{percent})<extra></extra>')
     else:
         fig.update_traces(texttemplate='$%{y:,.2s}', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
 
-    color_match = re.search(r'\b(red|green|blue|purple|orange|yellow|pink|black)\b', prompt_lower)
-    if color_match:
-        fig.update_traces(marker_color=color_match.group(1))
+    # Title logic: reuse previous title if the new prompt is just a command
+    new_title = user_prompt.strip().capitalize()
+    is_simple_command = len(user_prompt.split()) < 5 and any(w in prompt_lower for w in chart_types + ['color', 'professional'])
+    title = prev_title if (is_simple_command and prev_title) else new_title
 
     fig.update_layout(
-        title_text=user_prompt.strip().capitalize(), title_font_size=22,
+        title_text=title, title_font_size=22,
         font=dict(family="Arial, sans-serif", size=14, color="black"),
         xaxis_title="Entity", yaxis_title=column_name.replace("_", " ").title(),
-        showlegend=(chart_type == "pie")
+        showlegend=(chart_type == "pie") or (color_palette is not None and chart_type == 'bar')
     )
-    return fig
+    return fig, chart_type
 
 # --- UI Layout & Main Logic ---
 st.subheader("📊 Sample of the dataset")
@@ -151,7 +171,7 @@ if user_input:
                 args = json.loads(msg.function_call.arguments)
                 result = globals()[fname](**args)
                 
-                formatted_text = f"Here are the {args.get('n')} results for {args.get('column')}:\n\n"
+                formatted_text = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n"
                 formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                 
                 st.session_state.chat_history.append({
@@ -159,22 +179,28 @@ if user_input:
                     "chart_data": result, "chart_args": args
                 })
             else:
-                # --- LOGIC FIX: Expanded keywords to better detect chart modification requests ---
-                chart_keywords = [
-                    "chart", "visual", "bar", "graph", "pie", "line", "plot", 
-                    "convert", "change", "color", "blue", "red", "green", 
-                    "purple", "orange", "yellow", "pink", "black"
-                ]
+                chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
                 is_chart_mod_request = any(word in user_input.lower() for word in chart_keywords)
                 
-                last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m["role"] == "assistant" and "chart_data" in m), None)
+                last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
                 if is_chart_mod_request and last_assistant_msg_with_data:
                     result = last_assistant_msg_with_data["chart_data"]
                     args = last_assistant_msg_with_data["chart_args"]
-                    fig = create_chart(result, user_input, args.get("column", "Value"))
+                    
+                    last_fig_msg = next((m for m in reversed(st.session_state.chat_history) if m.get("figure")), None)
+                    prev_title = last_fig_msg['figure'].layout.title.text if last_fig_msg else None
+                    prev_chart_type = last_assistant_msg_with_data.get("chart_type", "bar")
+
+                    fig, new_chart_type = create_chart(
+                        data=result, user_prompt=user_input, column_name=args.get("column", "Value"),
+                        prev_chart_type=prev_chart_type, prev_title=prev_title
+                    )
+                    
+                    # --- FIX: Append only the figure, no conversational text ---
                     st.session_state.chat_history.append({
-                        "role": "assistant", "content": f"Here is the chart for '{user_input}'.", "figure": fig
+                        "role": "assistant", "content": None, "figure": fig,
+                        "chart_data": result, "chart_args": args, "chart_type": new_chart_type
                     })
                 else:
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
@@ -186,28 +212,17 @@ if user_input:
 
 # --- DISPLAY FIX: Reworked display logic for proper alignment and scrolling ---
 st.subheader("💬 Chat Interface")
-# Use st.container with a fixed height to create a reliable scrollable area.
 chat_container = st.container(height=600)
 
 with chat_container:
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f'''
-                <div class="message-wrapper user-wrapper">
-                    <div class="user-msg">{msg["content"]}</div>
-                </div>
-            ''', unsafe_allow_html=True)
+            st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
         
         elif msg["role"] == "assistant":
-            # Display assistant's text content in a bubble
             if msg.get("content"):
-                st.markdown(f'''
-                    <div class="message-wrapper assistant-wrapper">
-                        <div class="assistant-msg">{msg["content"]}</div>
-                    </div>
-                ''', unsafe_allow_html=True)
+                st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
             
-            # Display the figure directly into the container (will be left-aligned)
             if msg.get("figure"):
                 st.plotly_chart(msg["figure"], use_container_width=True)
 
