@@ -96,7 +96,6 @@ functions = [
     {"name": "bottom_n", "description": "Get bottom N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
 ]
 
-# --- TITLE FIX: Reworked function to generate smart titles and handle context ---
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
     chart_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"]).reset_index()
     chart_df.columns = ["Entity", "Value"]
@@ -130,16 +129,12 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     else:
         fig.update_traces(texttemplate='$%{y:,.2s}', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
 
-    # --- SMART TITLE LOGIC ---
-    # If there's a previous title, and the new prompt is a simple modification command, reuse the old title.
-    # Otherwise, generate a new, descriptive title from the function arguments.
-    is_simple_command = len(user_prompt.split()) < 5 and any(w in prompt_lower for w in chart_types + ['color', 'professional'])
+    is_simple_command = len(user_prompt.split()) < 6 and any(w in prompt_lower for w in chart_types + ['color', 'professional', 'remove', 'add'])
     if is_simple_command and prev_title:
         title = prev_title
     else:
-        # Generate a descriptive title from the arguments of the data function
         func_name = chart_args.get("func_name", "top_n")
-        n = chart_args.get("n", 5)
+        n = chart_args.get("n", len(data))
         column_name = chart_args.get("column", "value").replace('_', ' ').title()
         direction = "Top" if func_name == "top_n" else "Bottom"
         title = f"{direction} {n} Products by {column_name}"
@@ -147,7 +142,7 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     fig.update_layout(
         title_text=title, title_font_size=22,
         font=dict(family="Arial, sans-serif", size=14, color="black"),
-        xaxis_title="Entity", yaxis_title=column_name.replace("_", " ").title(),
+        xaxis_title="Entity", yaxis_title=chart_args.get("column", "value").replace('_', ' ').title(),
         showlegend=(chart_type == "pie") or (color_palette is not None and chart_type == 'bar')
     )
     return fig, chart_type
@@ -174,8 +169,6 @@ if user_input:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 result = globals()[fname](**args)
-                
-                # Store the function name in the args for title generation
                 args["func_name"] = fname
                 
                 formatted_text = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n"
@@ -186,29 +179,44 @@ if user_input:
                     "chart_data": result, "chart_args": args
                 })
             else:
-                chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
-                is_chart_mod_request = any(word in user_input.lower() for word in chart_keywords)
+                # --- CONTEXT LOGIC REWORKED ---
+                style_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
+                data_keywords = ["remove", "add", "without", "exclude", "include"]
+                
+                is_style_mod_request = any(word in user_input.lower() for word in style_keywords)
+                is_data_mod_request = any(word in user_input.lower() for word in data_keywords)
                 
                 last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
-                if is_chart_mod_request and last_assistant_msg_with_data:
-                    result = last_assistant_msg_with_data["chart_data"]
+                if (is_style_mod_request or is_data_mod_request) and last_assistant_msg_with_data:
+                    current_data = last_assistant_msg_with_data["chart_data"].copy()
                     args = last_assistant_msg_with_data["chart_args"]
+                    
+                    # --- DATA MODIFICATION LOGIC ---
+                    if is_data_mod_request:
+                        prompt_words = set(re.findall(r'\b\w+\b', user_input.lower()))
+                        keys_to_remove = []
+                        for key in current_data.keys():
+                            # Use fuzzy matching to see if the key is mentioned in the prompt
+                            if get_close_matches(key.lower(), prompt_words, n=1, cutoff=0.8):
+                                keys_to_remove.append(key)
+                        for key in keys_to_remove:
+                            del current_data[key]
                     
                     last_fig_msg = next((m for m in reversed(st.session_state.chat_history) if m.get("figure")), None)
                     prev_title = last_fig_msg['figure'].layout.title.text if last_fig_msg else None
                     prev_chart_type = last_assistant_msg_with_data.get("chart_type", "bar")
 
                     fig, new_chart_type = create_chart(
-                        data=result, user_prompt=user_input, chart_args=args,
+                        data=current_data, user_prompt=user_input, chart_args=args,
                         prev_chart_type=prev_chart_type, prev_title=prev_title
                     )
                     
                     st.session_state.chat_history.append({
                         "role": "assistant", 
-                        "content": f"[Chart generated based on user request: '{user_input}']",
+                        "content": f"[Chart updated based on user request: '{user_input}']",
                         "figure": fig,
-                        "chart_data": result, "chart_args": args, "chart_type": new_chart_type
+                        "chart_data": current_data, "chart_args": args, "chart_type": new_chart_type
                     })
                 else:
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
@@ -223,19 +231,15 @@ st.subheader("💬 Chat Interface")
 chat_container = st.container(height=600)
 
 with chat_container:
-    # --- ERROR FIX: Use enumerate to provide a unique key for each element ---
     for i, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "user":
-            # The 'key' parameter is invalid for st.markdown and was causing a TypeError. It has been removed.
             st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
         
         elif msg["role"] == "assistant":
             if msg.get("figure"):
                 st.plotly_chart(msg["figure"], use_container_width=True, key=f"chart_{i}")
             elif msg.get("content"):
-                # Don't display the hidden context message for charts
-                if not msg["content"].startswith("[Chart generated"):
-                    # The 'key' parameter is invalid for st.markdown and was causing a TypeError. It has been removed.
+                if not msg["content"].startswith("[Chart generated") and not msg["content"].startswith("[Chart updated"):
                     st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
