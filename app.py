@@ -12,21 +12,9 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- CSS STYLING (FIXED) ---
-# Correctly aligns user messages to the right and assistant to the left.
+# Styles for message bubbles. Alignment is now handled by the display logic.
 st.markdown("""
     <style>
-    .chat-box-container {
-        height: 600px;
-        overflow-y: scroll;
-        padding: 1.5rem;
-        background-color: #ffffff;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        margin-bottom: 1rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        display: flex;
-        flex-direction: column;
-    }
     .message-wrapper {
         display: flex;
         width: 100%;
@@ -149,12 +137,7 @@ user_input = st.chat_input("Ask: 'Top 5 drugs by spending'")
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     
-    # --- JSON SERIALIZABLE FIX ---
-    # Only send AI-readable content (text) to the API.
-    messages_for_gpt = []
-    for msg in st.session_state.chat_history:
-        # We only need the role and the text content for the AI's context
-        messages_for_gpt.append({"role": msg["role"], "content": msg["content"]})
+    messages_for_gpt = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state.chat_history]
 
     with st.spinner("Analyzing..."):
         try:
@@ -163,50 +146,37 @@ if user_input:
             )
             msg = response.choices[0].message
 
-            # --- LOGIC FLOW REWORKED ---
-            # Case 1: AI wants to call a function to get new data.
             if msg.function_call:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 result = globals()[fname](**args)
                 
-                # --- TEXT-FIRST FIX ---
-                # The default response is now always text.
                 formatted_text = f"Here are the {args.get('n')} results for {args.get('column')}:\n\n"
                 formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                 
-                # Store the text for display, and the raw data for potential chart conversion later.
                 st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": formatted_text,
-                    "chart_data": result, 
-                    "chart_args": args
+                    "role": "assistant", "content": formatted_text,
+                    "chart_data": result, "chart_args": args
                 })
-
-            # Case 2: AI response is text. Check if it's a chart modification request.
             else:
-                chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change"]
+                # --- LOGIC FIX: Expanded keywords to better detect chart modification requests ---
+                chart_keywords = [
+                    "chart", "visual", "bar", "graph", "pie", "line", "plot", 
+                    "convert", "change", "color", "blue", "red", "green", 
+                    "purple", "orange", "yellow", "pink", "black"
+                ]
                 is_chart_mod_request = any(word in user_input.lower() for word in chart_keywords)
                 
-                last_assistant_msg_with_data = None
-                for hist_msg in reversed(st.session_state.chat_history[:-1]): # Look before the user's current message
-                    if hist_msg["role"] == "assistant" and "chart_data" in hist_msg:
-                        last_assistant_msg_with_data = hist_msg
-                        break
+                last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m["role"] == "assistant" and "chart_data" in m), None)
 
                 if is_chart_mod_request and last_assistant_msg_with_data:
-                    # Found a chart to create/modify. Use OLD data with NEW prompt.
                     result = last_assistant_msg_with_data["chart_data"]
                     args = last_assistant_msg_with_data["chart_args"]
                     fig = create_chart(result, user_input, args.get("column", "Value"))
-                    # Add a new message with the figure
                     st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": f"Here is the chart for '{user_input}'.", # Context for AI
-                        "figure": fig
+                        "role": "assistant", "content": f"Here is the chart for '{user_input}'.", "figure": fig
                     })
                 else:
-                    # It's just a regular text response from the AI.
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
 
         except Exception as e:
@@ -214,20 +184,31 @@ if user_input:
     
     st.rerun()
 
-# --- Display Chat History ---
+# --- DISPLAY FIX: Reworked display logic for proper alignment and scrolling ---
 st.subheader("💬 Chat Interface")
-with st.container():
-    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
+# Use st.container with a fixed height to create a reliable scrollable area.
+chat_container = st.container(height=600)
+
+with chat_container:
     for msg in st.session_state.chat_history:
-        wrapper_class = "user-wrapper" if msg["role"] == "user" else "assistant-wrapper"
-        msg_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
+        if msg["role"] == "user":
+            st.markdown(f'''
+                <div class="message-wrapper user-wrapper">
+                    <div class="user-msg">{msg["content"]}</div>
+                </div>
+            ''', unsafe_allow_html=True)
         
-        with st.markdown(f'<div class="message-wrapper {wrapper_class}">', unsafe_allow_html=True):
-            if "figure" in msg and msg["figure"] is not None:
+        elif msg["role"] == "assistant":
+            # Display assistant's text content in a bubble
+            if msg.get("content"):
+                st.markdown(f'''
+                    <div class="message-wrapper assistant-wrapper">
+                        <div class="assistant-msg">{msg["content"]}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+            
+            # Display the figure directly into the container (will be left-aligned)
+            if msg.get("figure"):
                 st.plotly_chart(msg["figure"], use_container_width=True)
-            else:
-                st.markdown(f'<div class="{msg_class}">{msg["content"]}</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True) # Close message-wrapper
-    st.markdown('</div>', unsafe_allow_html=True) # Close chat-box-container
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
