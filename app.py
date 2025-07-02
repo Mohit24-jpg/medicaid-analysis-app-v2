@@ -11,11 +11,12 @@ import re
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Custom CSS for the chat bubbles and container.
+# --- CSS STYLING (FIXED) ---
+# Correctly aligns user messages to the right and assistant to the left.
 st.markdown("""
     <style>
     .chat-box-container {
-        height: 550px;
+        height: 600px;
         overflow-y: scroll;
         padding: 1.5rem;
         background-color: #ffffff;
@@ -26,25 +27,33 @@ st.markdown("""
         display: flex;
         flex-direction: column;
     }
+    .message-wrapper {
+        display: flex;
+        width: 100%;
+        margin: 5px 0;
+    }
+    .user-wrapper {
+        justify-content: flex-end;
+    }
+    .assistant-wrapper {
+        justify-content: flex-start;
+    }
     .user-msg, .assistant-msg {
         padding: 12px;
         border-radius: 18px;
-        margin: 10px 0;
         font-size: 1.05rem;
         width: fit-content;
-        max-width: 80%;
+        max-width: 75%;
     }
     .user-msg {
         background-color: #007bff;
         color: white;
         border-bottom-right-radius: 0;
-        align-self: flex-end;
     }
     .assistant-msg {
         background-color: #f1f1f1;
         color: black;
         border-bottom-left-radius: 0;
-        align-self: flex-start;
     }
     .credit { margin-top: 30px; font-size: 0.9rem; color: #888; text-align: center; }
     </style>
@@ -81,9 +90,7 @@ SMART_COLUMN_MAP = {
 
 # --- Session State Initialization ---
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [
-        {"role": "system", "content": "You are a helpful Medicaid data analyst assistant. When asked to create a chart, you must call a function to get the data first. If the user asks to modify an existing chart (e.g., 'change to a pie chart'), do not call a function, just respond with the modification request."}
-    ]
+    st.session_state.chat_history = []
 
 # --- Core Data & Charting Functions ---
 def resolve_column(col_name: str) -> str:
@@ -116,10 +123,8 @@ def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
     }
     fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text_auto='.2s'))
     
-    # --- ✨ FORMATTING FIX & CONTEXT FIX ---
-    # Apply number formatting and hover templates
     if chart_type == 'pie':
-        fig.update_traces(textinfo='percent+label', hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>Percentage: %{percent}<extra></extra>')
+        fig.update_traces(textinfo='percent+label', hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>(%{percent})<extra></extra>')
     else:
         fig.update_traces(texttemplate='$%{y:,.2s}', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
 
@@ -128,11 +133,9 @@ def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
         fig.update_traces(marker_color=color_match.group(1))
 
     fig.update_layout(
-        title_text=user_prompt.strip().capitalize(),
-        title_font_size=22,
+        title_text=user_prompt.strip().capitalize(), title_font_size=22,
         font=dict(family="Arial, sans-serif", size=14, color="black"),
-        xaxis_title="Entity",
-        yaxis_title=column_name.replace("_", " ").title(),
+        xaxis_title="Entity", yaxis_title=column_name.replace("_", " ").title(),
         showlegend=(chart_type == "pie")
     )
     return fig
@@ -141,13 +144,17 @@ def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
-user_input = st.chat_input("Ask: 'Top 5 drugs by spending as a pie chart'")
+user_input = st.chat_input("Ask: 'Top 5 drugs by spending'")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     
-    # Prepare messages for API, ensuring full context is passed
-    messages_for_gpt = [msg for msg in st.session_state.chat_history if msg["role"] != "assistant" or isinstance(msg.get("content"), str)]
+    # --- JSON SERIALIZABLE FIX ---
+    # Only send AI-readable content (text) to the API.
+    messages_for_gpt = []
+    for msg in st.session_state.chat_history:
+        # We only need the role and the text content for the AI's context
+        messages_for_gpt.append({"role": msg["role"], "content": msg["content"]})
 
     with st.spinner("Analyzing..."):
         try:
@@ -156,41 +163,50 @@ if user_input:
             )
             msg = response.choices[0].message
 
-            # Case 1: AI wants to call a function to get new data
+            # --- LOGIC FLOW REWORKED ---
+            # Case 1: AI wants to call a function to get new data.
             if msg.function_call:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 result = globals()[fname](**args)
-                fig = create_chart(result, user_input, args.get("column", "Value"))
+                
+                # --- TEXT-FIRST FIX ---
+                # The default response is now always text.
+                formatted_text = f"Here are the {args.get('n')} results for {args.get('column')}:\n\n"
+                formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                
+                # Store the text for display, and the raw data for potential chart conversion later.
                 st.session_state.chat_history.append({
                     "role": "assistant",
-                    "content": f"Generated a chart for '{user_input}'.", # Context for AI
-                    "figure": fig, "chart_data": result, "chart_args": args # Data for chart modification
+                    "content": formatted_text,
+                    "chart_data": result, 
+                    "chart_args": args
                 })
 
             # Case 2: AI response is text. Check if it's a chart modification request.
             else:
-                chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "area", "funnel", "treemap", "convert", "change"]
+                chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change"]
                 is_chart_mod_request = any(word in user_input.lower() for word in chart_keywords)
                 
-                last_chart_data = None
-                for hist_msg in reversed(st.session_state.chat_history):
+                last_assistant_msg_with_data = None
+                for hist_msg in reversed(st.session_state.chat_history[:-1]): # Look before the user's current message
                     if hist_msg["role"] == "assistant" and "chart_data" in hist_msg:
-                        last_chart_data = hist_msg
+                        last_assistant_msg_with_data = hist_msg
                         break
 
-                if is_chart_mod_request and last_chart_data:
-                    # Found a chart to modify. Use OLD data with NEW prompt.
-                    result = last_chart_data["chart_data"]
-                    args = last_chart_data["chart_args"]
+                if is_chart_mod_request and last_assistant_msg_with_data:
+                    # Found a chart to create/modify. Use OLD data with NEW prompt.
+                    result = last_assistant_msg_with_data["chart_data"]
+                    args = last_assistant_msg_with_data["chart_args"]
                     fig = create_chart(result, user_input, args.get("column", "Value"))
+                    # Add a new message with the figure
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": f"Modified the chart based on '{user_input}'.",
-                        "figure": fig, "chart_data": result, "chart_args": args
+                        "content": f"Here is the chart for '{user_input}'.", # Context for AI
+                        "figure": fig
                     })
                 else:
-                    # It's just a regular text response
+                    # It's just a regular text response from the AI.
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
 
         except Exception as e:
@@ -200,27 +216,18 @@ if user_input:
 
 # --- Display Chat History ---
 st.subheader("💬 Chat Interface")
-chat_container = st.container()
-with chat_container:
+with st.container():
+    st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
     for msg in st.session_state.chat_history:
-        if msg["role"] == "system": continue
+        wrapper_class = "user-wrapper" if msg["role"] == "user" else "assistant-wrapper"
+        msg_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
         
-        div_class = "user-msg" if msg["role"] == "user" else "assistant-msg"
-        
-        if "figure" in msg:
-            st.plotly_chart(msg["figure"], use_container_width=True)
-        elif isinstance(msg.get("content"), str):
-             # For user messages and text-only assistant messages
-            st.markdown(f'<div class="{div_class}">{msg["content"]}</div>', unsafe_allow_html=True)
-
-# Auto-scroll script
-st.components.v1.html("""
-    <script>
-        const chatContainer = window.parent.document.querySelector('.st-emotion-cache-1f1G2gn');
-        if (chatContainer) {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-    </script>
-""", height=0)
+        with st.markdown(f'<div class="message-wrapper {wrapper_class}">', unsafe_allow_html=True):
+            if "figure" in msg and msg["figure"] is not None:
+                st.plotly_chart(msg["figure"], use_container_width=True)
+            else:
+                st.markdown(f'<div class="{msg_class}">{msg["content"]}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True) # Close message-wrapper
+    st.markdown('</div>', unsafe_allow_html=True) # Close chat-box-container
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
