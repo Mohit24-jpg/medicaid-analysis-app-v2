@@ -102,7 +102,7 @@ if "chat_history" not in st.session_state:
     # --- NEW: Create an enhanced system prompt using the data dictionary ---
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions about this data. When asked for a specific drug, use the `get_product_stat` function. For calculations like 'cost per unit', use the `get_calculated_stat` function."
+    outro = "\n\nUse your functions to answer questions about this data. For simple rankings, use `top_n` or `bottom_n`. For questions about one specific drug, use `get_product_stat`. For complex rankings involving a calculated ratio (e.g., 'cost per unit'), use `get_top_n_by_calculated_metric`."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
@@ -143,13 +143,11 @@ def get_product_stat(product_name: str, column: str, stat: str) -> str:
     else:
         return f"Sorry, I can't calculate the '{stat}' for a product."
 
-    # --- FIX: Make response more descriptive ---
     if "amount" in resolved_column or "spending" in column:
         return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
     else:
         return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
 
-# --- NEW FUNCTION for calculated stats like 'cost per prescription' ---
 def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> str:
     product_names = df['product_name'].unique()
     match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
@@ -173,16 +171,29 @@ def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> 
 
     value = num_sum / den_sum
     
-    # --- FIX: Make response more descriptive ---
     return (f"The calculated average {numerator} per {denominator} for {actual_product_name} is ${value:,.2f}. "
             f"(Calculated as Total {num_col.replace('_', ' ').title()} / Total {den_col.replace('_', ' ').title()})")
 
+# --- NEW: Advanced calculation function for ranking ---
+def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> dict:
+    num_col = resolve_column(numerator)
+    den_col = resolve_column(denominator)
+
+    grouped = df.groupby('product_name').agg({ num_col: 'sum', den_col: 'sum' }).reset_index()
+
+    ratio_col_name = f"{numerator}_per_{denominator}"
+    grouped[ratio_col_name] = grouped.apply(lambda row: row[num_col] / row[den_col] if row[den_col] != 0 else 0, axis=1)
+    
+    top_n_df = grouped.nlargest(n, ratio_col_name)
+    
+    return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
 functions = [
-    {"name": "top_n", "description": "Get top N products by a numeric column. Use for questions like 'What are the top 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "bottom_n", "description": "Get bottom N products by a numeric column. Use for questions like 'What are the bottom 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "get_product_stat", "description": "Get a specific statistic (like average, total, or count) for a single named product. Use for questions about one specific drug.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
-    {"name": "get_calculated_stat", "description": "Calculate a 'per unit' statistic for a single product, like 'cost per prescription'. Use when a question involves division or a rate.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}}
+    {"name": "top_n", "description": "Get top N products by a single numeric column (e.g., total spending).", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "get_product_stat", "description": "Get a simple statistic (average, total, or count) for one specific, named product.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
+    {"name": "get_calculated_stat", "description": "Calculate a ratio for a single named product (e.g., cost per prescription for Trulicity).", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}},
+    {"name": "get_top_n_by_calculated_metric", "description": "Ranks all products by a calculated ratio metric (e.g., cost per unit, spending per prescription) and returns the top N. Use for questions involving 'per' or 'average' across multiple drugs.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}}
 ]
 
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
@@ -204,13 +215,7 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
 
     is_donut = 'donut' in prompt_lower or (prev_chart_type == 'donut' and 'pie' not in prompt_lower)
     
-    # --- COLOR FIX: Ensure color palette is passed to pie charts ---
-    fig_map = {
-        "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0),
-        "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4),
-        "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette),
-        "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette)
-    }
+    fig_map = {"pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0), "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4), "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette), "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette)}
     fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette))
     
     color_match = re.search(r'\b(red|green|blue|purple|orange|yellow|pink|black)\b', prompt_lower)
@@ -226,11 +231,18 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     if is_simple_command and prev_title:
         title = prev_title
     else:
-        func_name = chart_args.get("func_name", "top_n")
-        n = chart_args.get("n", len(data))
-        column_name = chart_args.get("column", "value").replace('_', ' ').title()
-        direction = "Top" if func_name == "top_n" else "Bottom"
-        title = f"{direction} {n} Products by {column_name}"
+        func_name = chart_args.get("func_name")
+        # --- FIX: Generate smart titles for the new calculation function ---
+        if func_name == 'get_top_n_by_calculated_metric':
+            n = chart_args.get("n", 5)
+            num = chart_args.get("numerator", "value").replace('_', ' ').title()
+            den = chart_args.get("denominator", "value").replace('_', ' ').title()
+            title = f"Top {n} Products by {num} Per {den}"
+        else:
+            n = chart_args.get("n", len(data))
+            column_name = chart_args.get("column", "value").replace('_', ' ').title()
+            direction = "Top" if func_name == "top_n" else "Bottom"
+            title = f"{direction} {n} Products by {column_name}"
 
     fig.update_layout(
         title_text=title, title_font_size=22,
@@ -270,6 +282,18 @@ if user_input:
                 elif fname == "get_calculated_stat":
                     result_string = get_calculated_stat(**args)
                     st.session_state.chat_history.append({"role": "assistant", "content": result_string})
+
+                elif fname == "get_top_n_by_calculated_metric":
+                    result = get_top_n_by_calculated_metric(**args)
+                    args["func_name"] = fname
+                    
+                    formatted_text = f"Here are the top {args.get('n')} results for {args.get('numerator')} per {args.get('denominator')}:\n\n"
+                    formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                    
+                    st.session_state.chat_history.append({
+                        "role": "assistant", "content": formatted_text,
+                        "chart_data": result, "chart_args": args
+                    })
 
                 elif fname in ["top_n", "bottom_n"]:
                     result = globals()[fname](**args)
