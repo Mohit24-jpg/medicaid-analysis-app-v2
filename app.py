@@ -220,7 +220,6 @@ functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "get_top_n_by_calculated_metric", "description": "Ranks products by a calculated ratio and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
     {"name": "provide_cost_saving_analysis", "description": "Generates strategic advice for a list of drugs.", "parameters": {"type": "object", "properties": {"drug_names": {"type": "array", "items": {"type": "string"}}}, "required": ["drug_names"]}},
-    # --- NEW: Simplified function list. The main AI now decides when to call the chart generator. ---
 ]
 
 # --- UI Layout & Main Logic ---
@@ -236,8 +235,9 @@ if user_input:
 
     with st.spinner("Analyzing..."):
         try:
-            # --- REWORKED LOGIC: Determine if the request is for data or a chart ---
-            is_chart_request = any(word in user_input.lower() for word in ["chart", "graph", "plot", "visualize", "bar", "pie", "donut", "line"])
+            # --- FIX: Expanded keyword list for better intent detection ---
+            chart_keywords = ["chart", "graph", "plot", "visualize", "bar", "pie", "donut", "line", "background", "color", "axis", "labels", "call out"]
+            is_chart_request = any(word in user_input.lower() for word in chart_keywords)
             last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
             # If it's a chart request and we have data from a previous step, generate a chart
@@ -263,12 +263,12 @@ if user_input:
                         result = get_top_n_by_calculated_metric(**args)
                         result_string = f"Here are the top {args.get('n')} results for {args.get('numerator')} per {args.get('denominator')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result})
-                        result_string = None # Prevent double printing
+                        result_string = None 
                     else: # top_n or bottom_n
                         result = globals()[fname](**args)
                         result_string = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result})
-                        result_string = None # Prevent double printing
+                        result_string = None
                     
                     if result_string:
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string})
