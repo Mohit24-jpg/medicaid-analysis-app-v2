@@ -45,6 +45,33 @@ st.markdown("""
         border-bottom-left-radius: 0;
     }
     .credit { margin-top: 30px; font-size: 0.9rem; color: #888; text-align: center; }
+    /* Style for the generated table */
+    .styled-table {
+        border-collapse: collapse;
+        margin: 25px 0;
+        font-size: 0.9em;
+        font-family: sans-serif;
+        min-width: 400px;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+    }
+    .styled-table thead tr {
+        background-color: #009879;
+        color: #ffffff;
+        text-align: left;
+    }
+    .styled-table th,
+    .styled-table td {
+        padding: 12px 15px;
+    }
+    .styled-table tbody tr {
+        border-bottom: 1px solid #dddddd;
+    }
+    .styled-table tbody tr:nth-of-type(even) {
+        background-color: #f3f3f3;
+    }
+    .styled-table tbody tr:last-of-type {
+        border-bottom: 2px solid #009879;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -100,7 +127,7 @@ SMART_COLUMN_MAP = {
 if "chat_history" not in st.session_state:
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure` and pass the user's full request for customization."
+    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
@@ -115,35 +142,6 @@ def top_n(column: str, n: int) -> dict:
 def bottom_n(column: str, n: int) -> dict:
     return df.groupby("product_name")[resolve_column(column)].sum().nsmallest(n).to_dict()
 
-def get_product_stat(product_name: str, column: str, stat: str) -> str:
-    product_names = df['product_name'].unique()
-    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
-    if not match: return f"Could not find data for a product matching '{product_name}'."
-    actual_product_name = match[0]
-    resolved_column = resolve_column(column)
-    product_df = df[df['product_name'] == actual_product_name]
-    if product_df.empty: return f"I found the product '{actual_product_name}' but it has no data for the column '{resolved_column}'."
-    if stat in ['average', 'mean', 'avg']: value, stat_name = product_df[resolved_column].mean(), "Average"
-    elif stat in ['total', 'sum']: value, stat_name = product_df[resolved_column].sum(), "Total"
-    elif stat in ['count', 'number']: return f"Based on the data, there are {int(product_df[resolved_column].count()):,} entries for {actual_product_name}."
-    else: return f"Sorry, I can't calculate the '{stat}' for a product."
-    if "amount" in resolved_column or "spending" in column: return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
-    else: return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
-
-def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> str:
-    product_names = df['product_name'].unique()
-    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
-    if not match: return f"Could not find data for a product matching '{product_name}'."
-    actual_product_name = match[0]
-    num_col, den_col = resolve_column(numerator), resolve_column(denominator)
-    product_df = df[df['product_name'] == actual_product_name]
-    if product_df.empty: return f"Could not find data for {actual_product_name}."
-    num_sum, den_sum = product_df[num_col].sum(), product_df[den_col].sum()
-    if den_sum == 0: return f"Cannot calculate as the denominator ({denominator}) is zero for {actual_product_name}."
-    value = num_sum / den_sum
-    return (f"The calculated average {numerator} per {denominator} for {actual_product_name} is ${value:,.2f}. "
-            f"(Calculated as Total {num_col.replace('_', ' ').title()} / Total {den_col.replace('_', ' ').title()})")
-
 def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> dict:
     num_col, den_col = resolve_column(numerator), resolve_column(denominator)
     grouped = df.groupby('product_name').agg({ num_col: 'sum', den_col: 'sum' }).reset_index()
@@ -152,17 +150,24 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     top_n_df = grouped.nlargest(n, ratio_col_name)
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
-def provide_cost_saving_analysis(drug_names: list[str]) -> str:
-    if not drug_names: return "Could not identify any drugs to analyze."
-    strategy_database = {
-        "STRENSIQ 8": "...", "H.P. ACTHA": "...", "ADYNOVATE": "..." # Abridged for brevity
-    }
-    final_report = "Here are some potential cost-saving strategies for the specified drugs:\n\n"
-    for drug in drug_names:
-        best_match = get_close_matches(drug, strategy_database.keys(), n=1, cutoff=0.8)
-        if best_match: final_report += strategy_database[best_match[0]] + "\n"
-        else: final_report += f"**For {drug}:**\n- No specific strategies were found.\n\n"
-    return final_report
+# --- NEW: Function to create a styled HTML table ---
+def create_table_html(data: dict, chart_args: dict) -> str:
+    """Creates a styled HTML table from the data."""
+    table_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"]).reset_index()
+    
+    func_name = chart_args.get("func_name", "top_n")
+    if func_name == 'get_top_n_by_calculated_metric':
+        value_col_name = f"{chart_args.get('numerator', 'value')} Per {chart_args.get('denominator', 'value')}".replace('_', ' ').title()
+    else:
+        value_col_name = chart_args.get("column", "value").replace('_', ' ').title()
+        
+    table_df.columns = ["Product Name", value_col_name]
+    
+    # Format the value column as currency
+    table_df[value_col_name] = table_df[value_col_name].apply(lambda x: f"${x:,.2f}")
+    
+    return table_df.to_html(classes='styled-table', index=False)
+
 
 # --- FIX: Updated charting function to accept context for better titles/labels ---
 def create_chart_figure(data: dict, customization_prompt: str, chart_args: dict) -> go.Figure:
@@ -172,7 +177,6 @@ def create_chart_figure(data: dict, customization_prompt: str, chart_args: dict)
     chart_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"]).reset_index()
     chart_df.columns = ["Entity", "Value"]
 
-    # --- FIX: Build a more detailed prompt for the Plotly Expert AI ---
     func_name = chart_args.get("func_name", "top_n")
     if func_name == 'get_top_n_by_calculated_metric':
         y_axis_label = f"{chart_args.get('numerator', 'value')} Per {chart_args.get('denominator', 'value')}".replace('_', ' ').title()
@@ -185,6 +189,7 @@ The data in the 'Entity' column represents: 'Product Name'.
 The data was generated by ranking the '{func_name}' based on the user's original request.
 """
 
+    # --- FIX: Added more specific instructions for the chart generation AI ---
     code_generation_prompt = f"""
 You are an expert Python data visualization assistant who specializes in the Plotly library.
 Your task is to write Python code to generate a chart based on a user's request and the provided data context.
@@ -198,8 +203,9 @@ Your code MUST:
 3. Create a figure object named `fig`.
 4. Do NOT include any code to display the chart (e.g., `fig.show()`).
 5. Do NOT include the DataFrame creation code; assume `chart_df` already exists.
-6. Handle complex requests like secondary y-axes, custom annotations, and specific color schemes.
-7. Set a descriptive title and axis labels for the chart based on the user's request and the data context provided above.
+6. Set a descriptive title and axis labels for the chart based on the user's request and the data context provided above.
+7. IMPORTANT: When adding annotations or text labels to bars, format the numbers as currency (e.g., '$1.2M', '$456.7k', '$789.00').
+8. IMPORTANT: Do NOT change the color scheme unless the user specifically asks for a color change (e.g., 'make it blue'). Preserve the default colorway if no color instruction is given.
 
 User's customization request: '{customization_prompt}'
 """
@@ -229,7 +235,6 @@ User's customization request: '{customization_prompt}'
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "get_top_n_by_calculated_metric", "description": "Ranks products by a calculated ratio and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
-    {"name": "provide_cost_saving_analysis", "description": "Generates strategic advice for a list of drugs.", "parameters": {"type": "object", "properties": {"drug_names": {"type": "array", "items": {"type": "string"}}}, "required": ["drug_names"]}},
 ]
 
 # --- UI Layout & Main Logic ---
@@ -245,23 +250,31 @@ if user_input:
 
     with st.spinner("Analyzing..."):
         try:
-            chart_keywords = ["chart", "graph", "plot", "visualize", "bar", "pie", "donut", "line", "background", "color", "axis", "labels", "call out"]
+            # --- FIX: Added "table" to keywords for better intent detection ---
+            viz_keywords = ["chart", "graph", "plot", "visualize", "bar", "pie", "donut", "line", "background", "color", "axis", "labels", "call out", "table"]
             question_words = ["what", "which", "how", "why", "recommend", "is there", "can you explain"]
             
             prompt_lower = user_input.lower().strip()
             is_question = any(prompt_lower.startswith(word) for word in question_words)
 
-            is_chart_request = any(word in prompt_lower for word in chart_keywords) and not is_question
+            is_viz_request = any(word in prompt_lower for word in viz_keywords) and not is_question
             last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
-            if is_chart_request and last_assistant_msg_with_data:
+            if is_viz_request and last_assistant_msg_with_data:
                 data = last_assistant_msg_with_data["chart_data"]
-                # --- FIX: Pass the original chart_args to the charting function ---
                 chart_args = last_assistant_msg_with_data.get("chart_args", {})
-                fig = create_chart_figure(data, user_input, chart_args)
-                st.session_state.chat_history.append({
-                    "role": "assistant", "content": f"[Chart generated for '{user_input}']", "figure": fig, "chart_data": data, "chart_args": chart_args
-                })
+                
+                # --- FIX: Logic to handle table creation ---
+                if 'table' in prompt_lower:
+                    table_html = create_table_html(data, chart_args)
+                    st.session_state.chat_history.append({
+                        "role": "assistant", "content": f"[Table generated for '{user_input}']", "table_html": table_html, "chart_data": data, "chart_args": chart_args
+                    })
+                else: # It's a chart request
+                    fig = create_chart_figure(data, user_input, chart_args)
+                    st.session_state.chat_history.append({
+                        "role": "assistant", "content": f"[Chart generated for '{user_input}']", "figure": fig, "chart_data": data, "chart_args": chart_args
+                    })
             else: 
                 response = openai.chat.completions.create(
                     model="gpt-4o", messages=messages_for_gpt, functions=functions, function_call="auto"
@@ -272,23 +285,16 @@ if user_input:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     
-                    if fname == "provide_cost_saving_analysis":
-                        result_string = provide_cost_saving_analysis(**args)
-                    elif fname == "get_top_n_by_calculated_metric":
+                    if fname == "get_top_n_by_calculated_metric":
                         result = get_top_n_by_calculated_metric(**args)
                         args["func_name"] = fname
                         result_string = f"Here are the top {args.get('n')} results for {args.get('numerator')} per {args.get('denominator')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result, "chart_args": args})
-                        result_string = None 
                     else: # top_n or bottom_n
                         result = globals()[fname](**args)
                         args["func_name"] = fname
                         result_string = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result, "chart_args": args})
-                        result_string = None
-                    
-                    if result_string:
-                        st.session_state.chat_history.append({"role": "assistant", "content": result_string})
 
                 else: 
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
@@ -310,8 +316,11 @@ with chat_container:
         elif msg["role"] == "assistant":
             if msg.get("figure"):
                 st.plotly_chart(msg["figure"], use_container_width=True, key=f"chart_{i}")
+            # --- FIX: Display logic for tables ---
+            elif msg.get("table_html"):
+                st.markdown(msg["table_html"], unsafe_allow_html=True)
             elif msg.get("content"):
-                if not msg["content"].startswith("[Chart generated"):
+                if not msg["content"].startswith("[Chart generated") and not msg["content"].startswith("[Table generated"):
                     st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
