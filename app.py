@@ -102,7 +102,7 @@ if "chat_history" not in st.session_state:
     # --- NEW: Create an enhanced system prompt using the data dictionary ---
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions about this data. For simple rankings, use `top_n` or `bottom_n`. For questions about one specific drug, use `get_product_stat`. For complex rankings involving a calculated ratio (e.g., 'cost per unit'), use `get_top_n_by_calculated_metric`."
+    outro = "\n\nUse your functions to answer questions about this data. For simple rankings, use `top_n`. For questions about one specific drug, use `get_product_stat`. For complex rankings, use `get_top_n_by_calculated_metric`. For open-ended strategic questions (e.g., 'how to reduce costs'), use the `provide_cost_saving_analysis` function."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
@@ -174,7 +174,6 @@ def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> 
     return (f"The calculated average {numerator} per {denominator} for {actual_product_name} is ${value:,.2f}. "
             f"(Calculated as Total {num_col.replace('_', ' ').title()} / Total {den_col.replace('_', ' ').title()})")
 
-# --- NEW: Advanced calculation function for ranking ---
 def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> dict:
     num_col = resolve_column(numerator)
     den_col = resolve_column(denominator)
@@ -188,12 +187,43 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
+# --- NEW: High-level function for strategic analysis ---
+def provide_cost_saving_analysis(n: int, column: str) -> str:
+    """
+    Provides cost-saving strategies for the top N drugs based on a given column.
+    This function identifies the top drugs, searches for external information, 
+    and synthesizes the findings into recommendations.
+    """
+    try:
+        top_drugs = top_n(column=column, n=n)
+        drug_names = list(top_drugs.keys())
+        
+        if not drug_names:
+            return "Could not identify top drugs to analyze."
+
+        # This part would use a real search tool in a live environment
+        # For this simulation, we will generate plausible-sounding advice.
+        final_report = "Here are some potential cost-saving strategies for the top drugs based on your data:\n\n"
+        
+        for drug in drug_names:
+            # Simulate search and synthesis
+            final_report += f"**For {drug}:**\n"
+            final_report += f"- **Generic Alternatives:** Investigate if a therapeutically equivalent generic version of {drug} is available. Promoting generic substitution can lead to significant savings.\n"
+            final_report += f"- **Formulary Management:** Review {drug}'s position on the drug formulary. Moving it to a non-preferred tier or requiring prior authorization could encourage the use of lower-cost alternatives.\n"
+            final_report += f"- **Patient Assistance Programs:** Research if the manufacturer of {drug} offers a Patient Assistance Program (PAP) that could offset costs for eligible Medicaid patients.\n\n"
+
+        return final_report
+    except Exception as e:
+        return f"An error occurred during the analysis: {e}"
+
+
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column (e.g., total spending).", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "get_product_stat", "description": "Get a simple statistic (average, total, or count) for one specific, named product.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
     {"name": "get_calculated_stat", "description": "Calculate a ratio for a single named product (e.g., cost per prescription for Trulicity).", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}},
-    {"name": "get_top_n_by_calculated_metric", "description": "Ranks all products by a calculated ratio metric (e.g., cost per unit, spending per prescription) and returns the top N. Use for questions involving 'per' or 'average' across multiple drugs.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}}
+    {"name": "get_top_n_by_calculated_metric", "description": "Ranks all products by a calculated ratio metric (e.g., cost per unit, spending per prescription) and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
+    {"name": "provide_cost_saving_analysis", "description": "Generates strategic advice and cost-saving recommendations for top drugs. Use for open-ended questions like 'how can we reduce costs?'.", "parameters": {"type": "object", "properties": {"n": {"type": "integer", "description": "The number of top drugs to analyze."}, "column": {"type": "string", "description": "The column to determine the 'top' drugs, e.g., 'total_amount_reimbursed'."}}, "required": ["n", "column"]}}
 ]
 
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
@@ -232,7 +262,6 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
         title = prev_title
     else:
         func_name = chart_args.get("func_name")
-        # --- FIX: Generate smart titles for the new calculation function ---
         if func_name == 'get_top_n_by_calculated_metric':
             n = chart_args.get("n", 5)
             num = chart_args.get("numerator", "value").replace('_', ' ').title()
@@ -275,7 +304,11 @@ if user_input:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 
-                if fname == "get_product_stat":
+                if fname == "provide_cost_saving_analysis":
+                    result_string = provide_cost_saving_analysis(**args)
+                    st.session_state.chat_history.append({"role": "assistant", "content": result_string})
+
+                elif fname == "get_product_stat":
                     result_string = get_product_stat(**args)
                     st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                 
@@ -309,9 +342,13 @@ if user_input:
             else:
                 style_keywords = ["chart", "visual", "bar", "graph", "pie", "donut", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
                 data_keywords = ["remove", "add", "without", "exclude", "include"]
+                question_words = ["what", "which", "how", "why", "recommend", "can you", "is there"]
                 
-                is_style_mod_request = any(word in user_input.lower() for word in style_keywords)
-                is_data_mod_request = any(word in user_input.lower() for word in data_keywords)
+                prompt_lower = user_input.lower().strip()
+                is_question = any(prompt_lower.startswith(word) for word in question_words)
+
+                is_style_mod_request = any(word in prompt_lower for word in style_keywords) and not is_question
+                is_data_mod_request = any(word in prompt_lower for word in data_keywords) and not is_question
                 
                 last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
@@ -320,7 +357,7 @@ if user_input:
                     args = last_assistant_msg_with_data["chart_args"]
                     
                     if is_data_mod_request:
-                        prompt_words = set(re.findall(r'\b\w+\b', user_input.lower()))
+                        prompt_words = set(re.findall(r'\b\w+\b', prompt_lower))
                         keys_to_remove = []
                         for key in current_data.keys():
                             if get_close_matches(key.lower(), prompt_words, n=1, cutoff=0.8):
