@@ -235,9 +235,14 @@ if user_input:
 
     with st.spinner("Analyzing..."):
         try:
-            # --- FIX: Expanded keyword list for better intent detection ---
+            # --- FIX: Better intent detection for conversational questions ---
             chart_keywords = ["chart", "graph", "plot", "visualize", "bar", "pie", "donut", "line", "background", "color", "axis", "labels", "call out"]
-            is_chart_request = any(word in user_input.lower() for word in chart_keywords)
+            question_words = ["what", "which", "how", "why", "recommend", "is there", "can you explain"]
+            
+            prompt_lower = user_input.lower().strip()
+            is_question = any(prompt_lower.startswith(word) for word in question_words)
+
+            is_chart_request = any(word in prompt_lower for word in chart_keywords) and not is_question
             last_assistant_msg_with_data = next((m for m in reversed(st.session_state.chat_history[:-1]) if m.get("chart_data")), None)
 
             # If it's a chart request and we have data from a previous step, generate a chart
