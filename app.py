@@ -11,20 +11,22 @@ import re
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Custom CSS for the chat bubbles and container
+# Custom CSS for the chat bubbles and container.
+# The key fix here is using `flex-direction: column` and having the display loop
+# handle the ordering of messages.
 st.markdown("""
     <style>
     .chat-box-container {
-        max-height: 550px;
+        height: 550px; /* Use height instead of max-height for a fixed size */
         overflow-y: scroll;
-        padding: 1rem;
+        padding: 1.5rem;
         background-color: #ffffff;
         border-radius: 12px;
-        border: 1px solid #ccc;
+        border: 1px solid #e0e0e0;
         margin-bottom: 1rem;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
         display: flex;
-        flex-direction: column-reverse; /* To keep chat at the bottom */
+        flex-direction: column;
     }
     .user-msg {
         background-color: #007bff;
@@ -36,6 +38,7 @@ st.markdown("""
         font-size: 1.05rem;
         width: fit-content;
         margin-left: auto;
+        align-self: flex-end;
     }
     .assistant-msg {
         background-color: #f1f1f1;
@@ -47,6 +50,7 @@ st.markdown("""
         font-size: 1.05rem;
         width: fit-content;
         margin-right: auto;
+        align-self: flex-start;
     }
     .credit {
         margin-top: 30px;
@@ -69,12 +73,10 @@ def load_data():
     df = pd.read_csv(csv_url)
     df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
     
-    # Clean numeric columns
     for col in ["units_reimbursed", "number_of_prescriptions", "total_amount_reimbursed", "medicaid_amount_reimbursed", "non_medicaid_amount_reimbursed"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-    # Normalize product names
     unique_names = df["product_name"].astype(str).unique().tolist()
     name_map = {name: get_close_matches(name, unique_names, n=1, cutoff=0.85)[0] if get_close_matches(name, unique_names, n=1, cutoff=0.85) else name for name in unique_names}
     df["product_name"] = df["product_name"].map(name_map)
@@ -94,16 +96,13 @@ SMART_COLUMN_MAP = {
 # --- Session State Initialization ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
-        {"role": "system", "content": "You are a Medicaid data analyst assistant. Use function calls and generate charts when asked."}
+        {"role": "system", "content": "You are a helpful Medicaid data analyst assistant. You will be asked to retrieve data and visualize it. When asked to create a chart, you must call a function to get the data first, then create the visualization."}
     ]
 
 # --- Core Functions ---
 def resolve_column(col_name: str) -> str:
     col_name = col_name.lower().strip()
-    if col_name in SMART_COLUMN_MAP:
-        return SMART_COLUMN_MAP[col_name]
-    matches = get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6)
-    return matches[0] if matches else col_name
+    return SMART_COLUMN_MAP.get(col_name, get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6)[0] if get_close_matches(col_name, COLUMN_LIST, n=1, cutoff=0.6) else col_name)
 
 # --- Data Analysis Functions for OpenAI ---
 def count_unique(column: str) -> int:
@@ -118,58 +117,44 @@ def top_n(column: str, n: int) -> dict:
 def bottom_n(column: str, n: int) -> dict:
     return df.groupby("product_name")[resolve_column(column)].sum().nsmallest(n).to_dict()
 
-def sum_by_product(column: str) -> dict:
-    return df.groupby("product_name")[resolve_column(column)].sum().sort_values(ascending=False).to_dict()
-
-def average_by_product(column: str) -> dict:
-    return df.groupby("product_name")[resolve_column(column)].mean().sort_values(ascending=False).to_dict()
-
 functions = [
     {"name": "count_unique", "description": "Count unique values in a column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
     {"name": "sum_column", "description": "Sum values in a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
     {"name": "top_n", "description": "Get top N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "sum_by_product", "description": "Sum a numeric column for each product.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}},
-    {"name": "average_by_product", "description": "Calculate average of a numeric column for each product.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}}, "required": ["column"]}}
 ]
 
-# --- ✨ New Versatile Charting Function ✨ ---
+# --- Versatile Charting Function ---
 def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
-    chart_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"])
-    chart_df.reset_index(inplace=True)
+    chart_df = pd.DataFrame.from_dict(data, orient='index', columns=["Value"]).reset_index()
     chart_df.columns = ["Entity", "Value"]
     
     prompt_lower = user_prompt.lower()
+    chart_types = ["pie", "line", "scatter", "area", "funnel", "treemap"]
+    chart_type = next((t for t in chart_types if t in prompt_lower), "bar")
+
+    fig_map = {
+        "pie": px.pie(chart_df, names='Entity', values='Value'),
+        "line": px.line(chart_df, x='Entity', y='Value', markers=True),
+        "scatter": px.scatter(chart_df, x='Entity', y='Value', size='Value', hover_name='Entity'),
+        "area": px.area(chart_df, x='Entity', y='Value', markers=True),
+        "funnel": px.funnel(chart_df, x='Value', y='Entity'),
+        "treemap": px.treemap(chart_df, path=['Entity'], values='Value'),
+        "bar": px.bar(chart_df, x='Entity', y='Value', text='Value')
+    }
+    fig = fig_map[chart_type]
     
-    # Detect chart type from prompt
-    if "pie" in prompt_lower:
-        fig = px.pie(chart_df, names='Entity', values='Value', title=user_prompt.strip().capitalize())
-    elif "line" in prompt_lower:
-        fig = px.line(chart_df, x='Entity', y='Value', title=user_prompt.strip().capitalize(), markers=True)
-    elif "scatter" in prompt_lower:
-        fig = px.scatter(chart_df, x='Entity', y='Value', title=user_prompt.strip().capitalize(), size='Value', hover_name='Entity')
-    elif "area" in prompt_lower:
-        fig = px.area(chart_df, x='Entity', y='Value', title=user_prompt.strip().capitalize(), markers=True)
-    elif "funnel" in prompt_lower:
-        fig = px.funnel(chart_df, x='Value', y='Entity', title=user_prompt.strip().capitalize())
-    elif "treemap" in prompt_lower:
-        fig = px.treemap(chart_df, path=['Entity'], values='Value', title=user_prompt.strip().capitalize())
-    else: # Default to bar chart
-        fig = px.bar(chart_df, x='Entity', y='Value', text='Value', title=user_prompt.strip().capitalize())
-    
-    # Detect color from prompt
     color_match = re.search(r'\b(red|green|blue|purple|orange|yellow|pink|black)\b', prompt_lower)
     if color_match:
         fig.update_traces(marker_color=color_match.group(1))
 
-    # General styling
-    fig.update_traces(texttemplate='$%{text:,.0f}', textposition='auto')
     fig.update_layout(
+        title_text=user_prompt.strip().capitalize(),
         title_font_size=22,
         font=dict(family="Arial, sans-serif", size=14, color="black"),
         xaxis_title=chart_df.columns[0],
         yaxis_title=column_name.replace("_", " ").title(),
-        showlegend=False
+        showlegend=(chart_type == "pie")
     )
     return fig
 
@@ -177,13 +162,19 @@ def create_chart(data: dict, user_prompt: str, column_name: str) -> go.Figure:
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
-user_input = st.chat_input("Ask: 'Top 5 drugs by spending as a blue bar chart'")
+user_input = st.chat_input("Ask: 'Show a pie chart for the top 5 drugs by prescriptions'")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-    # Prepare messages for OpenAI API
-    messages_for_gpt = [msg for msg in st.session_state.chat_history if msg["role"] != "assistant" or isinstance(msg["content"], str)]
+    # ** CONTEXT FIX **: Prepare messages for API, ensuring chart context is preserved.
+    messages_for_gpt = []
+    for msg in st.session_state.chat_history:
+        if msg["role"] in ["system", "user"]:
+            messages_for_gpt.append(msg)
+        elif msg["role"] == "assistant" and isinstance(msg.get("content"), str):
+            # For assistant messages, only send the text content for context
+            messages_for_gpt.append({"role": "assistant", "content": msg["content"]})
 
     with st.spinner("Analyzing..."):
         try:
@@ -204,12 +195,27 @@ if user_input:
                     result = globals()[fname](**args)
                     
                     if isinstance(result, dict):
-                        # Check if a chart was requested
-                        if any(word in user_input.lower() for word in ["chart", "visual", "bar", "graph", "pie", "line", "plot", "area", "funnel", "treemap"]):
+                        # Check context from history for chart keywords
+                        chart_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "area", "funnel", "treemap"]
+                        chart_request_in_context = any(word in user_input.lower() for word in chart_keywords)
+                        
+                        if not chart_request_in_context:
+                            # Look at previous user message if current one isn't a chart request
+                            if len(st.session_state.chat_history) > 1:
+                                prev_user_msg = next((m['content'] for m in reversed(st.session_state.chat_history[:-1]) if m['role'] == 'user'), None)
+                                if prev_user_msg and any(word in prev_user_msg.lower() for word in chart_keywords):
+                                    chart_request_in_context = True
+                                    user_input = prev_user_msg # Use the original chart prompt for title/type
+
+                        if chart_request_in_context:
                             fig = create_chart(result, user_input, args.get("column", "Value"))
-                            st.session_state.chat_history.append({"role": "assistant", "content": fig})
+                            # ** CONTEXT FIX **: Store a text summary for the AI and the figure for Streamlit
+                            st.session_state.chat_history.append({
+                                "role": "assistant",
+                                "content": f"Generated a '{fig.layout.title.text}' chart.", # Context for the AI
+                                "figure": fig # Object for Streamlit to render
+                            })
                         else:
-                            # Format as text if no chart is requested
                             formatted = "\n".join([f"{k.strip()}: ${v:,.2f}" if isinstance(v, (int, float)) and v > 1000 else f"{k.strip()}: {v}" for k, v in result.items()])
                             st.session_state.chat_history.append({"role": "assistant", "content": formatted})
                     else:
@@ -224,22 +230,34 @@ if user_input:
         except Exception as e:
             st.session_state.chat_history.append({"role": "assistant", "content": f"An error occurred: {e}"})
     
-    # Rerun to display the new message immediately
     st.rerun()
 
-# --- Display Chat History (Restored Bubble Interface) ---
+# --- Display Chat History ---
 st.subheader("💬 Chat Interface")
-st.markdown('<div class="chat-box-container">', unsafe_allow_html=True)
-# Iterate in reverse to show latest messages at the bottom
-for msg in reversed(st.session_state.chat_history):
-    if msg["role"] == "system":
-        continue # Don't display system messages
-    if msg["role"] == "user":
-        st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-    elif isinstance(msg["content"], go.Figure):
-        st.plotly_chart(msg["content"], use_container_width=True)
-    elif isinstance(msg["content"], str):
-        st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+chat_container = st.container()
+
+with chat_container:
+    # ** MESSAGE FLOW FIX **: Iterate through messages normally. CSS handles the visual order.
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "system":
+            continue
+        if msg["role"] == "user":
+            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+        elif msg["role"] == "assistant":
+            # ** DISPLAY FIX **: Check for a figure to render, otherwise show text.
+            if "figure" in msg and msg["figure"] is not None:
+                st.plotly_chart(msg["figure"], use_container_width=True)
+            elif isinstance(msg.get("content"), str):
+                st.markdown(f'<div class="assistant-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+
+# A small script to auto-scroll to the bottom of the chat container
+st.components.v1.html("""
+    <script>
+        const chatContainer = window.parent.document.querySelector('.st-emotion-cache-1f1G2gn');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    </script>
+""", height=0)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
