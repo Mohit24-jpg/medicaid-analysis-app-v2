@@ -68,20 +68,19 @@ def load_data_and_definitions():
     name_map = {name: get_close_matches(name, unique_names, n=1, cutoff=0.85)[0] if get_close_matches(name, unique_names, n=1, cutoff=0.85) else name for name in unique_names}
     df["product_name"] = df["product_name"].map(name_map)
     
-    # --- NEW: Load and parse the data dictionary ---
-    data_dictionary_csv = """
-    Variable Name,Label,Description,Data Type
-    utilization_type,Utilization Type,"Indicates whether the state reported data is for 'FFS' (Fee-for-Service) or 'MCO' (Managed Care Organization).",string
-    state,State,"The two-character abbreviation for the state in which the drug was dispensed.",string
-    ndc,National Drug Code,"The 11-digit National Drug Code (NDC) of the drug that was dispensed.",string
-    product_name,Product Name,"The proprietary name, if any, and the strength of the drug product.",string
-    units_reimbursed,Units Reimbursed,"The number of units of the drug dispensed.",numeric
-    number_of_prescriptions,Number of Prescriptions,"The number of prescriptions dispensed.",numeric
-    total_amount_reimbursed,Total Amount Reimbursed,"The total amount reimbursed from all sources for the drug.",numeric
-    medicaid_amount_reimbursed,Medicaid Amount Reimbursed,"The amount reimbursed by the Medicaid program for the drug.",numeric
-    non_medicaid_amount_reimbursed,Non-Medicaid Amount Reimbursed,"The amount reimbursed from other sources for the drug.",numeric
-    quarter,Quarter,"The calendar quarter and year of the report.",date
-    """
+    # --- FIX: Removed leading whitespace from the CSV string to prevent parsing errors ---
+    data_dictionary_csv = """Variable Name,Label,Description,Data Type
+utilization_type,Utilization Type,"Indicates whether the state reported data is for 'FFS' (Fee-for-Service) or 'MCO' (Managed Care Organization).",string
+state,State,"The two-character abbreviation for the state in which the drug was dispensed.",string
+ndc,National Drug Code,"The 11-digit National Drug Code (NDC) of the drug that was dispensed.",string
+product_name,Product Name,"The proprietary name, if any, and the strength of the drug product.",string
+units_reimbursed,Units Reimbursed,"The number of units of the drug dispensed.",numeric
+number_of_prescriptions,Number of Prescriptions,"The number of prescriptions dispensed.",numeric
+total_amount_reimbursed,Total Amount Reimbursed,"The total amount reimbursed from all sources for the drug.",numeric
+medicaid_amount_reimbursed,Medicaid Amount Reimbursed,"The amount reimbursed by the Medicaid program for the drug.",numeric
+non_medicaid_amount_reimbursed,Non-Medicaid Amount Reimbursed,"The amount reimbursed from other sources for the drug.",numeric
+quarter,Quarter,"The calendar quarter and year of the report.",date
+"""
     
     dd_df = pd.read_csv(StringIO(data_dictionary_csv))
     column_definitions = {row['Variable Name']: row['Description'] for index, row in dd_df.iterrows()}
