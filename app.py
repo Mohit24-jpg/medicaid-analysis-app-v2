@@ -102,7 +102,8 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     
     prompt_lower = user_prompt.lower()
     
-    chart_types = ["pie", "line", "scatter", "area", "funnel", "treemap"]
+    # --- DONUT CHART FIX: Added 'donut' to the list of chart types ---
+    chart_types = ["pie", "donut", "line", "scatter", "area", "funnel", "treemap"]
     chart_type = next((t for t in chart_types if t in prompt_lower), prev_chart_type)
 
     color_palette = None
@@ -113,8 +114,12 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     elif 'pastel' in prompt_lower:
         color_palette = px.colors.qualitative.Pastel
 
+    # --- DONUT CHART FIX: Check for 'donut' and set the hole parameter ---
+    is_donut = 'donut' in prompt_lower or (prev_chart_type == 'donut' and 'pie' not in prompt_lower)
+    
     fig_map = {
-        "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette),
+        "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0),
+        "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4),
         "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette),
         "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette)
     }
@@ -124,7 +129,7 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     if color_match:
         fig.update_traces(marker_color=color_match.group(1))
 
-    if chart_type == 'pie':
+    if chart_type in ['pie', 'donut']:
         fig.update_traces(textinfo='percent+label', hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>(%{percent})<extra></extra>')
     else:
         fig.update_traces(texttemplate='$%{y:,.2s}', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
@@ -143,9 +148,11 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
         title_text=title, title_font_size=22,
         font=dict(family="Arial, sans-serif", size=14, color="black"),
         xaxis_title="Entity", yaxis_title=chart_args.get("column", "value").replace('_', ' ').title(),
-        showlegend=(chart_type == "pie") or (color_palette is not None and chart_type == 'bar')
+        showlegend=(chart_type in ["pie", "donut"]) or (color_palette is not None and chart_type == 'bar')
     )
-    return fig, chart_type
+    # If it's a donut, make sure the final chart type is stored correctly for context
+    final_chart_type = 'donut' if is_donut else chart_type
+    return fig, final_chart_type
 
 # --- UI Layout & Main Logic ---
 st.subheader("📊 Sample of the dataset")
@@ -179,8 +186,8 @@ if user_input:
                     "chart_data": result, "chart_args": args
                 })
             else:
-                # --- CONTEXT LOGIC REWORKED ---
-                style_keywords = ["chart", "visual", "bar", "graph", "pie", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
+                # --- DONUT CHART FIX: Added 'donut' to style keywords ---
+                style_keywords = ["chart", "visual", "bar", "graph", "pie", "donut", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
                 data_keywords = ["remove", "add", "without", "exclude", "include"]
                 
                 is_style_mod_request = any(word in user_input.lower() for word in style_keywords)
@@ -192,12 +199,10 @@ if user_input:
                     current_data = last_assistant_msg_with_data["chart_data"].copy()
                     args = last_assistant_msg_with_data["chart_args"]
                     
-                    # --- DATA MODIFICATION LOGIC ---
                     if is_data_mod_request:
                         prompt_words = set(re.findall(r'\b\w+\b', user_input.lower()))
                         keys_to_remove = []
                         for key in current_data.keys():
-                            # Use fuzzy matching to see if the key is mentioned in the prompt
                             if get_close_matches(key.lower(), prompt_words, n=1, cutoff=0.8):
                                 keys_to_remove.append(key)
                         for key in keys_to_remove:
