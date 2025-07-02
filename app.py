@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import json
 from difflib import get_close_matches
 import re
+from io import StringIO
 
 # --- Page and Style Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
@@ -54,19 +55,40 @@ st.markdown("#### Ask questions about drug spending, reimbursement, and utilizat
 
 # --- Data Loading and Preparation ---
 @st.cache_data(show_spinner="Loading and preparing data...")
-def load_data():
+def load_data_and_definitions():
+    # Load main dataset
     csv_url = "https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/master/data-06-17-2025-2_01pm.csv"
     df = pd.read_csv(csv_url)
     df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
     for col in ["units_reimbursed", "number_of_prescriptions", "total_amount_reimbursed", "medicaid_amount_reimbursed", "non_medicaid_amount_reimbursed"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
     unique_names = df["product_name"].astype(str).unique().tolist()
     name_map = {name: get_close_matches(name, unique_names, n=1, cutoff=0.85)[0] if get_close_matches(name, unique_names, n=1, cutoff=0.85) else name for name in unique_names}
     df["product_name"] = df["product_name"].map(name_map)
-    return df
+    
+    # --- NEW: Load and parse the data dictionary ---
+    data_dictionary_csv = """
+    Variable Name,Label,Description,Data Type
+    utilization_type,Utilization Type,"Indicates whether the state reported data is for 'FFS' (Fee-for-Service) or 'MCO' (Managed Care Organization).",string
+    state,State,"The two-character abbreviation for the state in which the drug was dispensed.",string
+    ndc,National Drug Code,"The 11-digit National Drug Code (NDC) of the drug that was dispensed.",string
+    product_name,Product Name,"The proprietary name, if any, and the strength of the drug product.",string
+    units_reimbursed,Units Reimbursed,"The number of units of the drug dispensed.",numeric
+    number_of_prescriptions,Number of Prescriptions,"The number of prescriptions dispensed.",numeric
+    total_amount_reimbursed,Total Amount Reimbursed,"The total amount reimbursed from all sources for the drug.",numeric
+    medicaid_amount_reimbursed,Medicaid Amount Reimbursed,"The amount reimbursed by the Medicaid program for the drug.",numeric
+    non_medicaid_amount_reimbursed,Non-Medicaid Amount Reimbursed,"The amount reimbursed from other sources for the drug.",numeric
+    quarter,Quarter,"The calendar quarter and year of the report.",date
+    """
+    
+    dd_df = pd.read_csv(StringIO(data_dictionary_csv))
+    column_definitions = {row['Variable Name']: row['Description'] for index, row in dd_df.iterrows()}
+    
+    return df, column_definitions
 
-df = load_data()
+df, COLUMN_DEFINITIONS = load_data_and_definitions()
 COLUMN_LIST = df.columns.tolist()
 
 SMART_COLUMN_MAP = {
@@ -78,7 +100,12 @@ SMART_COLUMN_MAP = {
 
 # --- Session State Initialization ---
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    # --- NEW: Create an enhanced system prompt using the data dictionary ---
+    intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
+    definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
+    outro = "\n\nUse your functions to answer questions about this data. When asked for a specific drug, use the `get_product_stat` function."
+    system_prompt = intro + definitions_text + outro
+    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
 # --- Core Data & Charting Functions ---
 def resolve_column(col_name: str) -> str:
@@ -91,9 +118,41 @@ def top_n(column: str, n: int) -> dict:
 def bottom_n(column: str, n: int) -> dict:
     return df.groupby("product_name")[resolve_column(column)].sum().nsmallest(n).to_dict()
 
+def get_product_stat(product_name: str, column: str, stat: str) -> str:
+    product_names = df['product_name'].unique()
+    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
+    
+    if not match:
+        return f"I could not find data for a product matching '{product_name}'."
+        
+    actual_product_name = match[0]
+    resolved_column = resolve_column(column)
+    product_df = df[df['product_name'] == actual_product_name]
+    
+    if product_df.empty:
+         return f"I found the product '{actual_product_name}' but it has no data for the column '{resolved_column}'."
+
+    if stat in ['average', 'mean', 'avg']:
+        value = product_df[resolved_column].mean()
+        stat_name = "Average"
+    elif stat in ['total', 'sum', 'total amount']:
+        value = product_df[resolved_column].sum()
+        stat_name = "Total"
+    elif stat in ['count', 'number']:
+        value = product_df[resolved_column].count()
+        return f"There are {int(value):,} entries for {actual_product_name}."
+    else:
+        return f"Sorry, I can't calculate the '{stat}' for a product."
+
+    if "amount" in resolved_column or "spending" in column:
+        return f"The {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
+    else:
+        return f"The {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
+
 functions = [
-    {"name": "top_n", "description": "Get top N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
-    {"name": "bottom_n", "description": "Get bottom N products by a numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "top_n", "description": "Get top N products by a numeric column. Use for questions like 'What are the top 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "bottom_n", "description": "Get bottom N products by a numeric column. Use for questions like 'What are the bottom 5 drugs?'", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "get_product_stat", "description": "Get a specific statistic (like average, total, or count) for a single named product. Use for questions about one specific drug.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string", "description": "The name of the product to look up."}, "column": {"type": "string", "description": "The data column to analyze, e.g., 'spending', 'prescriptions'."}, "stat": {"type": "string", "description": "The statistic to calculate: 'average', 'total', or 'count'."}}, "required": ["product_name", "column", "stat"]}}
 ]
 
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
@@ -102,7 +161,6 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     
     prompt_lower = user_prompt.lower()
     
-    # --- DONUT CHART FIX: Added 'donut' to the list of chart types ---
     chart_types = ["pie", "donut", "line", "scatter", "area", "funnel", "treemap"]
     chart_type = next((t for t in chart_types if t in prompt_lower), prev_chart_type)
 
@@ -114,7 +172,6 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
     elif 'pastel' in prompt_lower:
         color_palette = px.colors.qualitative.Pastel
 
-    # --- DONUT CHART FIX: Check for 'donut' and set the hole parameter ---
     is_donut = 'donut' in prompt_lower or (prev_chart_type == 'donut' and 'pie' not in prompt_lower)
     
     fig_map = {
@@ -150,7 +207,6 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
         xaxis_title="Entity", yaxis_title=chart_args.get("column", "value").replace('_', ' ').title(),
         showlegend=(chart_type in ["pie", "donut"]) or (color_palette is not None and chart_type == 'bar')
     )
-    # If it's a donut, make sure the final chart type is stored correctly for context
     final_chart_type = 'donut' if is_donut else chart_type
     return fig, final_chart_type
 
@@ -175,18 +231,23 @@ if user_input:
             if msg.function_call:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
-                result = globals()[fname](**args)
-                args["func_name"] = fname
                 
-                formatted_text = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n"
-                formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                if fname == "get_product_stat":
+                    result_string = get_product_stat(**args)
+                    st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                 
-                st.session_state.chat_history.append({
-                    "role": "assistant", "content": formatted_text,
-                    "chart_data": result, "chart_args": args
-                })
+                elif fname in ["top_n", "bottom_n"]:
+                    result = globals()[fname](**args)
+                    args["func_name"] = fname
+                    
+                    formatted_text = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n"
+                    formatted_text += "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                    
+                    st.session_state.chat_history.append({
+                        "role": "assistant", "content": formatted_text,
+                        "chart_data": result, "chart_args": args
+                    })
             else:
-                # --- DONUT CHART FIX: Added 'donut' to style keywords ---
                 style_keywords = ["chart", "visual", "bar", "graph", "pie", "donut", "line", "plot", "convert", "change", "color", "professional", "vibrant", "pastel", "blue", "red", "green", "purple"]
                 data_keywords = ["remove", "add", "without", "exclude", "include"]
                 
