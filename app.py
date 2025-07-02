@@ -102,7 +102,7 @@ if "chat_history" not in st.session_state:
     # --- NEW: Create an enhanced system prompt using the data dictionary ---
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions about this data. For simple rankings, use `top_n`. For questions about one specific drug, use `get_product_stat`. For complex rankings, use `get_top_n_by_calculated_metric`. For open-ended strategic questions (e.g., 'how to reduce costs'), use the `provide_cost_saving_analysis` function."
+    outro = "\n\nUse your functions to answer questions about this data. For simple rankings, use `top_n`. For questions about one specific drug, use `get_product_stat`. For complex rankings, use `get_top_n_by_calculated_metric`. For open-ended strategic questions about specific drugs (e.g., 'how to reduce costs on these drugs'), use the `provide_cost_saving_analysis` function by providing the list of drugs from the previous context."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
@@ -187,30 +187,27 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
-# --- NEW: High-level function for strategic analysis ---
-def provide_cost_saving_analysis(n: int, column: str) -> str:
+# --- FIX: Reworked function to take a list of drugs for analysis ---
+def provide_cost_saving_analysis(drug_names: list[str]) -> str:
     """
-    Provides cost-saving strategies for the top N drugs based on a given column.
-    This function identifies the top drugs, searches for external information, 
+    Provides cost-saving strategies for a given list of drugs.
+    This function simulates searching for external information for each drug
     and synthesizes the findings into recommendations.
     """
     try:
-        top_drugs = top_n(column=column, n=n)
-        drug_names = list(top_drugs.keys())
-        
         if not drug_names:
-            return "Could not identify top drugs to analyze."
+            return "Could not identify any drugs to analyze. Please specify which drugs you are interested in."
 
         # This part would use a real search tool in a live environment
         # For this simulation, we will generate plausible-sounding advice.
-        final_report = "Here are some potential cost-saving strategies for the top drugs based on your data:\n\n"
+        final_report = "Here are some potential cost-saving strategies for the specified drugs:\n\n"
         
         for drug in drug_names:
             # Simulate search and synthesis
             final_report += f"**For {drug}:**\n"
-            final_report += f"- **Generic Alternatives:** Investigate if a therapeutically equivalent generic version of {drug} is available. Promoting generic substitution can lead to significant savings.\n"
-            final_report += f"- **Formulary Management:** Review {drug}'s position on the drug formulary. Moving it to a non-preferred tier or requiring prior authorization could encourage the use of lower-cost alternatives.\n"
-            final_report += f"- **Patient Assistance Programs:** Research if the manufacturer of {drug} offers a Patient Assistance Program (PAP) that could offset costs for eligible Medicaid patients.\n\n"
+            final_report += f"- **Generic or Therapeutic Alternatives:** Investigate if a therapeutically equivalent generic or a lower-cost alternative brand-name drug is available. Promoting substitution can lead to significant savings.\n"
+            final_report += f"- **Formulary Management:** Review {drug}'s position on the drug formulary. Moving it to a non-preferred tier, requiring prior authorization, or implementing step therapy could encourage the use of more cost-effective options first.\n"
+            final_report += f"- **Manufacturer Rebates & Patient Assistance Programs (PAPs):** Negotiate higher manufacturer rebates. Also, research if the manufacturer of {drug} offers a PAP that could offset costs for eligible Medicaid patients.\n\n"
 
         return final_report
     except Exception as e:
@@ -223,7 +220,8 @@ functions = [
     {"name": "get_product_stat", "description": "Get a simple statistic (average, total, or count) for one specific, named product.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
     {"name": "get_calculated_stat", "description": "Calculate a ratio for a single named product (e.g., cost per prescription for Trulicity).", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}},
     {"name": "get_top_n_by_calculated_metric", "description": "Ranks all products by a calculated ratio metric (e.g., cost per unit, spending per prescription) and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
-    {"name": "provide_cost_saving_analysis", "description": "Generates strategic advice and cost-saving recommendations for top drugs. Use for open-ended questions like 'how can we reduce costs?'.", "parameters": {"type": "object", "properties": {"n": {"type": "integer", "description": "The number of top drugs to analyze."}, "column": {"type": "string", "description": "The column to determine the 'top' drugs, e.g., 'total_amount_reimbursed'."}}, "required": ["n", "column"]}}
+    # --- FIX: Updated function definition to accept a list of drug names ---
+    {"name": "provide_cost_saving_analysis", "description": "Generates strategic advice and cost-saving recommendations for a specific list of drugs. Use for open-ended questions like 'how can we reduce costs on these drugs?'.", "parameters": {"type": "object", "properties": {"drug_names": {"type": "array", "items": {"type": "string"}, "description": "A list of the drug names to analyze, extracted from the conversation context."}}, "required": ["drug_names"]}}
 ]
 
 def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type: str = 'bar', prev_title: str = None) -> tuple[go.Figure, str]:
@@ -304,6 +302,7 @@ if user_input:
                 fname = msg.function_call.name
                 args = json.loads(msg.function_call.arguments)
                 
+                # --- FIX: Handle the new strategic analysis function call ---
                 if fname == "provide_cost_saving_analysis":
                     result_string = provide_cost_saving_analysis(**args)
                     st.session_state.chat_history.append({"role": "assistant", "content": result_string})
