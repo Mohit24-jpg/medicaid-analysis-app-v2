@@ -187,7 +187,6 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
-# --- FIX: Replaced generic advice with specific, researched strategies ---
 def provide_cost_saving_analysis(drug_names: list[str]) -> str:
     """
     Provides specific, researched cost-saving strategies for a given list of drugs.
@@ -196,7 +195,6 @@ def provide_cost_saving_analysis(drug_names: list[str]) -> str:
         if not drug_names:
             return "Could not identify any drugs to analyze. Please specify which drugs you are interested in."
 
-        # Researched, drug-specific information
         strategy_database = {
             "STRENSIQ 8": (
                 "**For Strensiq (asfotase alfa):** This is an ultra-rare enzyme replacement therapy with no direct generic equivalent.\n"
@@ -221,7 +219,6 @@ def provide_cost_saving_analysis(drug_names: list[str]) -> str:
         final_report = "Here are some potential cost-saving strategies for the specified drugs:\n\n"
         
         for drug in drug_names:
-            # Find the closest match in our strategy database
             best_match = get_close_matches(drug, strategy_database.keys(), n=1, cutoff=0.8)
             if best_match:
                 final_report += strategy_database[best_match[0]] + "\n"
@@ -261,17 +258,24 @@ def create_chart(data: dict, user_prompt: str, chart_args: dict, prev_chart_type
 
     is_donut = 'donut' in prompt_lower or (prev_chart_type == 'donut' and 'pie' not in prompt_lower)
     
-    fig_map = {"pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0), "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4), "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette), "bar": px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette)}
-    fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text_auto='.2s', color='Entity', color_discrete_sequence=color_palette))
+    # --- FIX: Changed bar chart creation to use text parameter instead of text_auto ---
+    fig_map = {
+        "pie": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4 if is_donut else 0),
+        "donut": px.pie(chart_df, names='Entity', values='Value', color_discrete_sequence=color_palette, hole=0.4),
+        "line": px.line(chart_df, x='Entity', y='Value', markers=True, color_discrete_sequence=color_palette),
+        "bar": px.bar(chart_df, x='Entity', y='Value', text=chart_df['Value'], color='Entity', color_discrete_sequence=color_palette)
+    }
+    fig = fig_map.get(chart_type, px.bar(chart_df, x='Entity', y='Value', text=chart_df['Value'], color='Entity', color_discrete_sequence=color_palette))
     
     color_match = re.search(r'\b(red|green|blue|purple|orange|yellow|pink|black)\b', prompt_lower)
     if color_match:
         fig.update_traces(marker_color=color_match.group(1))
 
+    # --- FIX: Set textposition to 'outside' for bar charts ---
     if chart_type in ['pie', 'donut']:
         fig.update_traces(textinfo='percent+label', hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>(%{percent})<extra></extra>')
     else:
-        fig.update_traces(texttemplate='$%{y:,.2s}', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
+        fig.update_traces(texttemplate='$%{text:,.2s}', textposition='outside', hovertemplate='<b>%{x}</b><br>Value: $%{y:,.2f}<extra></extra>')
 
     is_simple_command = len(user_prompt.split()) < 6 and any(w in prompt_lower for w in chart_types + ['color', 'professional', 'remove', 'add'])
     if is_simple_command and prev_title:
