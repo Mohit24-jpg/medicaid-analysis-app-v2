@@ -19,7 +19,11 @@ st.markdown("""
     .main .block-container {
         padding-top: 0.2rem;
     }
-    /* --- FIX: Center align the subtitle --- */
+    /* --- FIX: Center align the main title --- */
+    h1 {
+        text-align: center;
+    }
+    /* Center align the subtitle */
     h4 {
         text-align: center;
     }
