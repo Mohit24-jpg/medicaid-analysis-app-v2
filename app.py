@@ -96,7 +96,8 @@ SMART_COLUMN_MAP = {
 if "chat_history" not in st.session_state:
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. For vague follow-ups like 'tell me more' or 'something else', first ask for clarification (e.g., 'When you mention cost-efficiency, would you like to see the top drugs by cost per prescription?') before calling a function."
+    # --- FIX: Updated instructions to include get_unique_values ---
+    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. To get a list of unique values from a column (e.g., all states), use `get_unique_values`."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
     st.session_state.initial_load = True
@@ -148,6 +149,14 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     grouped[ratio_col_name] = grouped.apply(lambda row: row[num_col] / row[den_col] if row[den_col] != 0 else 0, axis=1)
     top_n_df = grouped.nlargest(n, ratio_col_name)
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
+
+# --- NEW: Function to get unique values from a column ---
+def get_unique_values(column: str) -> list:
+    """Gets a list of unique values from a specified column."""
+    resolved_column = resolve_column(column)
+    if resolved_column not in df.columns:
+        return [f"Error: Column '{resolved_column}' not found."]
+    return df[resolved_column].unique().tolist()
 
 def create_table_html(data: dict, chart_args: dict) -> str:
     """Creates a styled HTML table from the data."""
@@ -226,12 +235,14 @@ User's customization request: '{customization_prompt}'
         fig.update_layout(title_text=f"Chart Generation Error: {e}")
         return fig
 
+# --- FIX: Added get_unique_values to the list of functions ---
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "get_product_stat", "description": "Get a simple statistic (average, total, or count) for one specific, named product.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
     {"name": "get_calculated_stat", "description": "Calculate a ratio for a single named product (e.g., cost per prescription for Trulicity).", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}},
     {"name": "get_top_n_by_calculated_metric", "description": "Ranks products by a calculated ratio and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
+    {"name": "get_unique_values", "description": "Get a list of unique values from a specified column in the dataset.", "parameters": {"type": "object", "properties": {"column": {"type": "string", "description": "The name of the column to get unique values from."}}, "required": ["column"]}}
 ]
 
 # --- UI Layout & Main Logic ---
@@ -299,7 +310,14 @@ if user_input:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     
-                    if fname in ["get_product_stat", "get_calculated_stat"]:
+                    # --- FIX: Handle the new get_unique_values function ---
+                    if fname == "get_unique_values":
+                        unique_list = get_unique_values(**args)
+                        result_string = f"Here are the unique values for the '{args.get('column')}' column:\n\n"
+                        result_string += ", ".join(sorted(map(str, unique_list)))
+                        st.session_state.chat_history.append({"role": "assistant", "content": result_string})
+
+                    elif fname in ["get_product_stat", "get_calculated_stat"]:
                         result_string = globals()[fname](**args)
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                     
