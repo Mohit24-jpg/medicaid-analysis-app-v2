@@ -16,6 +16,10 @@ openai.api_key = st.secrets["OPENAI_API_KEY"]
 # Styles for message bubbles. Alignment is now handled by the display logic.
 st.markdown("""
     <style>
+    /* Reduce top padding of the main app container */
+    .main .block-container {
+        padding-top: 2rem;
+    }
     .message-wrapper {
         display: flex;
         width: 100%;
@@ -76,7 +80,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- App Header ---
-st.image("https://raw.githubusercontent.com/Mohit24-jpg/medicaid-analysis-app-v2/cd6be561d335a58ec5ca855ba3065a9e05eadfac/assets/logo.png", width=150)
+# --- FIX: Removed the st.image() call for the logo ---
 st.title("💊 Medicaid Drug Spending NLP Analytics")
 st.markdown("#### Ask questions about drug spending, reimbursement, and utilization.")
 
