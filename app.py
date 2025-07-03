@@ -7,7 +7,6 @@ import json
 from difflib import get_close_matches
 import re
 from io import StringIO
-import streamlit.components.v1 as components
 
 # --- Page and Style Configuration ---
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
@@ -20,9 +19,11 @@ st.markdown("""
     .main .block-container {
         padding-top: 0.2rem;
     }
+    /* --- FIX: Center align the main title --- */
     h1 {
         text-align: center;
     }
+    /* Center align the subtitle */
     h4 {
         text-align: center;
     }
@@ -39,29 +40,6 @@ st.markdown("""
     .styled-table tbody tr { border-bottom: 1px solid #dddddd; }
     .styled-table tbody tr:nth-of-type(even) { background-color: #f3f3f3; }
     .styled-table tbody tr:last-of-type { border-bottom: 2px solid #007bff; }
-
-    /* --- NEW: Style for the voice input button --- */
-    #voice-button {
-        position: absolute;
-        right: 10px;
-        top: 50%;
-        transform: translateY(-50%);
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 1.5rem;
-        color: #555;
-    }
-    #voice-button:hover {
-        color: #000;
-    }
-    #voice-button.listening {
-        color: #ff4b4b;
-    }
-    /* Make chat input container relative to position the button */
-    div[data-testid="stChatInput"] {
-        position: relative;
-    }
 </style>
 """
 , unsafe_allow_html=True)
@@ -376,75 +354,6 @@ if user_input:
 
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
-
-# --- NEW: JavaScript to add voice input functionality ---
-components.html("""
-    <button id="voice-button">🎤</button>
-    <script>
-        const voiceButton = document.getElementById('voice-button');
-        const chatInput = window.parent.document.querySelector('textarea[data-testid="stChatInput"]');
-        const chatInputContainer = window.parent.document.querySelector('div[data-testid="stChatInput"]');
-
-        if (chatInput && chatInputContainer) {
-            // Move the button into the chat input container
-            chatInputContainer.appendChild(voiceButton);
-        }
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-
-            voiceButton.addEventListener('click', () => {
-                if (voiceButton.classList.contains('listening')) {
-                    recognition.stop();
-                } else {
-                    recognition.start();
-                }
-            });
-
-            recognition.onstart = () => {
-                voiceButton.classList.add('listening');
-                chatInput.placeholder = 'Listening...';
-            };
-
-            recognition.onend = () => {
-                voiceButton.classList.remove('listening');
-                chatInput.placeholder = 'Ask: \\'Top 5 drugs by spending\\'';
-            };
-
-            recognition.onresult = (event) => {
-                let interimTranscript = '';
-                let finalTranscript = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
-                    } else {
-                        interimTranscript += event.results[i][0].transcript;
-                    }
-                }
-                
-                chatInput.value = finalTranscript || interimTranscript;
-                chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-                if (finalTranscript) {
-                    const enterKeyEvent = new KeyboardEvent('keydown', {
-                        key: 'Enter',
-                        code: 'Enter',
-                        which: 13,
-                        keyCode: 13,
-                        bubbles: true
-                    });
-                    chatInput.dispatchEvent(enterKeyEvent);
-                }
-            };
-        } else {
-            voiceButton.style.display = 'none';
-        }
-    </script>
-""", height=0)
-
 
 if not st.session_state.get('initial_load', True):
     st.components.v1.html("""
