@@ -20,6 +20,13 @@ st.markdown("""
     .main .block-container {
         padding-top: 0.5rem;
     }
+    /* Style for the main title */
+    h1 {
+        background-color: #eef2f9;
+        padding: 1rem;
+        border-radius: 10px;
+        text-align: center;
+    }
     .message-wrapper { display: flex; width: 100%; margin: 5px 0; }
     .user-wrapper { justify-content: flex-end; }
     .assistant-wrapper { justify-content: flex-start; }
@@ -317,3 +324,13 @@ if user_input:
 
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
+
+# --- NEW: JavaScript to auto-scroll the chat container ---
+st.components.v1.html("""
+    <script>
+        var chatContainer = window.parent.document.querySelector('.st-emotion-cache-1f1G2gn');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    </script>
+""", height=0)
