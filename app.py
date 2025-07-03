@@ -95,10 +95,11 @@ SMART_COLUMN_MAP = {
 if "chat_history" not in st.session_state:
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    # --- FIX: Improved instructions for handling conversational follow-ups ---
-    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. For vague follow-ups like 'tell me more', first ask for clarification (e.g., 'Would you like to see the data for that?') before calling a function."
+    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. For vague follow-ups like 'tell me more' or 'something else', first ask for clarification (e.g., 'When you mention cost-efficiency, would you like to see the top drugs by cost per prescription?') before calling a function."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
+    # --- FIX: Initialize a flag for the initial load ---
+    st.session_state.initial_load = True
 
 # --- Core Data & Charting Functions ---
 def resolve_column(col_name: str) -> str:
@@ -258,6 +259,8 @@ with chat_container:
 user_input = st.chat_input("Ask: 'Top 5 drugs by spending'")
 
 if user_input:
+    # --- FIX: Set the initial_load flag to False after the first user interaction ---
+    st.session_state.initial_load = False
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     
     messages_for_gpt = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state.chat_history if msg.get("content") is not None]
@@ -323,12 +326,13 @@ if user_input:
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
 
-# --- NEW: JavaScript to auto-scroll the chat container ---
-st.components.v1.html("""
-    <script>
-        var chatContainer = window.parent.document.querySelector('.st-emotion-cache-1f1G2gn');
-        if (chatContainer) {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-    </script>
-""", height=0)
+# --- FIX: Only run the auto-scroll script after the first interaction ---
+if not st.session_state.get('initial_load', True):
+    st.components.v1.html("""
+        <script>
+            var chatContainer = window.parent.document.querySelector('.st-emotion-cache-1f1G2gn');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        </script>
+    """, height=0)
