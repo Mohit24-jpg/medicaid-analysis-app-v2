@@ -13,12 +13,11 @@ st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wi
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- CSS Styling ---
-# --- FIX: Reverted to a single, light-theme CSS block ---
 st.markdown("""
     <style>
     /* Reduce top padding of the main app container */
     .main .block-container {
-        padding-top: 0.5rem;
+        padding-top: 0.2rem;
     }
     /* Style for the main title */
     h1 {
@@ -96,7 +95,8 @@ SMART_COLUMN_MAP = {
 if "chat_history" not in st.session_state:
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`."
+    # --- FIX: Improved instructions for handling conversational follow-ups ---
+    outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. For vague follow-ups like 'tell me more', first ask for clarification (e.g., 'Would you like to see the data for that?') before calling a function."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
@@ -225,7 +225,6 @@ User's customization request: '{customization_prompt}'
         fig.update_layout(title_text=f"Chart Generation Error: {e}")
         return fig
 
-# --- FIX: Restored all data functions to the list for the AI to use ---
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
@@ -298,12 +297,11 @@ if user_input:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     
-                    # --- FIX: Route to the correct function based on the AI's choice ---
                     if fname in ["get_product_stat", "get_calculated_stat"]:
                         result_string = globals()[fname](**args)
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                     
-                    else: # top_n, bottom_n, get_top_n_by_calculated_metric
+                    else: 
                         result = globals()[fname](**args)
                         args["func_name"] = fname
                         
