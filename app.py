@@ -96,7 +96,6 @@ SMART_COLUMN_MAP = {
 if "chat_history" not in st.session_state:
     intro = "You are a helpful Medicaid data analyst assistant. You have access to a dataset with the following columns:\n\n"
     definitions_text = "\n".join([f"- `{col}`: {desc}" for col, desc in COLUMN_DEFINITIONS.items()])
-    # --- FIX: Updated instructions to include get_unique_values ---
     outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. To get a list of unique values from a column (e.g., all states), use `get_unique_values`."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
@@ -150,7 +149,6 @@ def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> 
     top_n_df = grouped.nlargest(n, ratio_col_name)
     return pd.Series(top_n_df[ratio_col_name].values, index=top_n_df['product_name']).to_dict()
 
-# --- NEW: Function to get unique values from a column ---
 def get_unique_values(column: str) -> list:
     """Gets a list of unique values from a specified column."""
     resolved_column = resolve_column(column)
@@ -235,7 +233,6 @@ User's customization request: '{customization_prompt}'
         fig.update_layout(title_text=f"Chart Generation Error: {e}")
         return fig
 
-# --- FIX: Added get_unique_values to the list of functions ---
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
@@ -310,11 +307,27 @@ if user_input:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     
-                    # --- FIX: Handle the new get_unique_values function ---
                     if fname == "get_unique_values":
+                        # --- FIX: Improved conversational phrasing for unique values ---
                         unique_list = get_unique_values(**args)
-                        result_string = f"Here are the unique values for the '{args.get('column')}' column:\n\n"
-                        result_string += ", ".join(sorted(map(str, unique_list)))
+                        column_name = args.get('column')
+                        
+                        if len(unique_list) == 0:
+                            result_string = f"I couldn't find any data for the '{column_name}' column."
+                        elif len(unique_list) == 1:
+                            if column_name == 'state':
+                                state_map = {'OH': 'Ohio', 'CA': 'California', 'TX': 'Texas', 'FL': 'Florida', 'NY': 'New York'}
+                                state_code = unique_list[0]
+                                state_name = state_map.get(state_code, state_code)
+                                if state_name != state_code:
+                                    result_string = f"This dataset appears to only contain data for the state of {state_name} ({state_code})."
+                                else:
+                                    result_string = f"This dataset appears to only contain data for the state '{state_code}'."
+                            else:
+                                result_string = f"It looks like the only unique value for '{column_name}' is: {unique_list[0]}."
+                        else:
+                            result_string = f"The unique values for the '{column_name}' column are: {', '.join(sorted(map(str, unique_list)))}."
+                        
                         st.session_state.chat_history.append({"role": "assistant", "content": result_string})
 
                     elif fname in ["get_product_stat", "get_calculated_stat"]:
