@@ -18,7 +18,7 @@ st.markdown("""
     <style>
     /* Reduce top padding of the main app container */
     .main .block-container {
-        padding-top: 1rem;
+        padding-top: 0.5rem;
     }
     .message-wrapper { display: flex; width: 100%; margin: 5px 0; }
     .user-wrapper { justify-content: flex-end; }
@@ -103,6 +103,35 @@ def top_n(column: str, n: int) -> dict:
 
 def bottom_n(column: str, n: int) -> dict:
     return df.groupby("product_name")[resolve_column(column)].sum().nsmallest(n).to_dict()
+
+def get_product_stat(product_name: str, column: str, stat: str) -> str:
+    product_names = df['product_name'].unique()
+    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
+    if not match: return f"I could not find data for a product matching '{product_name}'."
+    actual_product_name = match[0]
+    resolved_column = resolve_column(column)
+    product_df = df[df['product_name'] == actual_product_name]
+    if product_df.empty: return f"I found the product '{actual_product_name}' but it has no data for the column '{resolved_column}'."
+    if stat in ['average', 'mean', 'avg']: value, stat_name = product_df[resolved_column].mean(), "Average"
+    elif stat in ['total', 'sum']: value, stat_name = product_df[resolved_column].sum(), "Total"
+    elif stat in ['count', 'number']: return f"Based on the data, there are {int(product_df[resolved_column].count()):,} entries for {actual_product_name}."
+    else: return f"Sorry, I can't calculate the '{stat}' for a product."
+    if "amount" in resolved_column or "spending" in column: return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is ${value:,.2f}."
+    else: return f"Based on the data, the {stat_name.lower()} {column} for {actual_product_name} is {value:,.2f}."
+
+def get_calculated_stat(product_name: str, numerator: str, denominator: str) -> str:
+    product_names = df['product_name'].unique()
+    match = get_close_matches(product_name.upper(), product_names, n=1, cutoff=0.8)
+    if not match: return f"I could not find data for a product matching '{product_name}'."
+    actual_product_name = match[0]
+    num_col, den_col = resolve_column(numerator), resolve_column(denominator)
+    product_df = df[df['product_name'] == actual_product_name]
+    if product_df.empty: return f"Could not find data for {actual_product_name}."
+    num_sum, den_sum = product_df[num_col].sum(), product_df[den_col].sum()
+    if den_sum == 0: return f"Cannot calculate as the denominator ({denominator}) is zero for {actual_product_name}."
+    value = num_sum / den_sum
+    return (f"The calculated average {numerator} per {denominator} for {actual_product_name} is ${value:,.2f}. "
+            f"(Calculated as Total {num_col.replace('_', ' ').title()} / Total {den_col.replace('_', ' ').title()})")
 
 def get_top_n_by_calculated_metric(numerator: str, denominator: str, n: int) -> dict:
     num_col, den_col = resolve_column(numerator), resolve_column(denominator)
@@ -189,9 +218,12 @@ User's customization request: '{customization_prompt}'
         fig.update_layout(title_text=f"Chart Generation Error: {e}")
         return fig
 
+# --- FIX: Restored all data functions to the list for the AI to use ---
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
+    {"name": "get_product_stat", "description": "Get a simple statistic (average, total, or count) for one specific, named product.", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "column": {"type": "string"}, "stat": {"type": "string"}}, "required": ["product_name", "column", "stat"]}},
+    {"name": "get_calculated_stat", "description": "Calculate a ratio for a single named product (e.g., cost per prescription for Trulicity).", "parameters": {"type": "object", "properties": {"product_name": {"type": "string"}, "numerator": {"type": "string"}, "denominator": {"type": "string"}}, "required": ["product_name", "numerator", "denominator"]}},
     {"name": "get_top_n_by_calculated_metric", "description": "Ranks products by a calculated ratio and returns the top N.", "parameters": {"type": "object", "properties": {"numerator": {"type": "string"}, "denominator": {"type": "string"}, "n": {"type": "integer"}}, "required": ["numerator", "denominator", "n"]}},
 ]
 
@@ -201,7 +233,6 @@ st.dataframe(df.head(10), use_container_width=True)
 
 # --- DISPLAY LOGIC ---
 st.subheader("💬 Chat Interface")
-# --- FIX: Restored the fixed-height container for the chat history ---
 chat_container = st.container(height=600)
 
 with chat_container:
@@ -246,8 +277,7 @@ if user_input:
                         "role": "assistant", "content": f"[Table generated for '{user_input}']", "table_html": table_html, "chart_data": data, "chart_args": chart_args
                     })
                 else: 
-                    # Pass "Light" theme since dark mode is removed
-                    fig = create_chart_figure(data, user_input, chart_args, "Light")
+                    fig = create_chart_figure(data, user_input, chart_args)
                     st.session_state.chat_history.append({
                         "role": "assistant", "content": f"[Chart generated for '{user_input}']", "figure": fig, "chart_data": data, "chart_args": chart_args
                     })
@@ -261,15 +291,21 @@ if user_input:
                     fname = msg.function_call.name
                     args = json.loads(msg.function_call.arguments)
                     
-                    result = globals()[fname](**args)
-                    args["func_name"] = fname
+                    # --- FIX: Route to the correct function based on the AI's choice ---
+                    if fname in ["get_product_stat", "get_calculated_stat"]:
+                        result_string = globals()[fname](**args)
+                        st.session_state.chat_history.append({"role": "assistant", "content": result_string})
                     
-                    if fname == "get_top_n_by_calculated_metric":
-                        result_string = f"Here are the top {args.get('n')} results for {args.get('numerator')} per {args.get('denominator')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
-                    else:
-                        result_string = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
-                    
-                    st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result, "chart_args": args})
+                    else: # top_n, bottom_n, get_top_n_by_calculated_metric
+                        result = globals()[fname](**args)
+                        args["func_name"] = fname
+                        
+                        if fname == "get_top_n_by_calculated_metric":
+                            result_string = f"Here are the top {args.get('n')} results for {args.get('numerator')} per {args.get('denominator')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                        else:
+                            result_string = f"Here are the {args.get('n', 'top')} results for {args.get('column')}:\n\n" + "\n".join([f"- {k.strip()}: ${v:,.2f}" for k, v in result.items()])
+                        
+                        st.session_state.chat_history.append({"role": "assistant", "content": result_string, "chart_data": result, "chart_args": args})
 
                 else: 
                     st.session_state.chat_history.append({"role": "assistant", "content": msg.content})
