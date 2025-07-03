@@ -12,72 +12,85 @@ from io import StringIO
 st.set_page_config(page_title="Medicaid Drug Spending NLP Analytics", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- CSS STYLING (FIXED) ---
-# Styles for message bubbles. Alignment is now handled by the display logic.
-st.markdown("""
-    <style>
+# --- Theme Toggle ---
+with st.sidebar:
+    st.header("Settings")
+    if "theme" not in st.session_state:
+        st.session_state.theme = "Dark" # Default theme
+    
+    selected_theme = st.radio(
+        "Choose a theme",
+        ("Dark", "Light"),
+        key="theme_radio",
+        on_change=lambda: st.session_state.update(theme=st.session_state.theme_radio)
+    )
+
+
+# --- Dynamic CSS Styling based on Theme ---
+light_theme_css = """
+<style>
     /* Reduce top padding of the main app container */
     .main .block-container {
         padding-top: 1rem;
     }
-    .message-wrapper {
-        display: flex;
-        width: 100%;
-        margin: 5px 0;
+    /* --- FIX: New chat history container style --- */
+    .chat-history-container {
+        max-height: 600px;
+        overflow-y: auto;
+        padding: 1rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        margin-bottom: 1rem;
     }
-    .user-wrapper {
-        justify-content: flex-end;
+    .message-wrapper { display: flex; width: 100%; margin: 5px 0; }
+    .user-wrapper { justify-content: flex-end; }
+    .assistant-wrapper { justify-content: flex-start; }
+    .user-msg, .assistant-msg { padding: 12px; border-radius: 18px; font-size: 1.05rem; width: fit-content; max-width: 75%; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    .user-msg { background-color: #007bff; color: white; border-bottom-right-radius: 0; }
+    .assistant-msg { background-color: #f1f1f1; color: black; border-bottom-left-radius: 0; }
+    .credit { margin-top: 30px; font-size: 0.9rem; color: #555; text-align: center; }
+    .styled-table { border-collapse: collapse; margin: 25px 0; font-size: 0.9em; font-family: sans-serif; min-width: 400px; box-shadow: 0 0 20px rgba(0, 0, 0, 0.15); }
+    .styled-table thead tr { background-color: #007bff; color: #ffffff; text-align: left; }
+    .styled-table th, .styled-table td { padding: 12px 15px; }
+    .styled-table tbody tr { border-bottom: 1px solid #dddddd; }
+    .styled-table tbody tr:nth-of-type(even) { background-color: #f3f3f3; }
+    .styled-table tbody tr:last-of-type { border-bottom: 2px solid #007bff; }
+</style>
+"""
+
+dark_theme_css = """
+<style>
+    /* Reduce top padding of the main app container */
+    .main .block-container {
+        padding-top: 1rem;
     }
-    .assistant-wrapper {
-        justify-content: flex-start;
+    /* --- FIX: New chat history container style --- */
+    .chat-history-container {
+        max-height: 600px;
+        overflow-y: auto;
+        padding: 1rem;
+        border: 1px solid #3a3d46;
+        border-radius: 10px;
+        margin-bottom: 1rem;
     }
-    .user-msg, .assistant-msg {
-        padding: 12px;
-        border-radius: 18px;
-        font-size: 1.05rem;
-        width: fit-content;
-        max-width: 75%;
-    }
-    .user-msg {
-        background-color: #007bff;
-        color: white;
-        border-bottom-right-radius: 0;
-    }
-    .assistant-msg {
-        background-color: #f1f1f1;
-        color: black;
-        border-bottom-left-radius: 0;
-    }
+    .message-wrapper { display: flex; width: 100%; margin: 5px 0; }
+    .user-wrapper { justify-content: flex-end; }
+    .assistant-wrapper { justify-content: flex-start; }
+    .user-msg, .assistant-msg { padding: 12px; border-radius: 18px; font-size: 1.05rem; width: fit-content; max-width: 75%; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .user-msg { background-color: #007bff; color: white; border-bottom-right-radius: 0; }
+    .assistant-msg { background-color: #2b2d31; color: #f0f0f0; border-bottom-left-radius: 0; }
     .credit { margin-top: 30px; font-size: 0.9rem; color: #888; text-align: center; }
-    /* Style for the generated table */
-    .styled-table {
-        border-collapse: collapse;
-        margin: 25px 0;
-        font-size: 0.9em;
-        font-family: sans-serif;
-        min-width: 400px;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
-    }
-    .styled-table thead tr {
-        background-color: #009879;
-        color: #ffffff;
-        text-align: left;
-    }
-    .styled-table th,
-    .styled-table td {
-        padding: 12px 15px;
-    }
-    .styled-table tbody tr {
-        border-bottom: 1px solid #dddddd;
-    }
-    .styled-table tbody tr:nth-of-type(even) {
-        background-color: #f3f3f3;
-    }
-    .styled-table tbody tr:last-of-type {
-        border-bottom: 2px solid #009879;
-    }
-    </style>
-""", unsafe_allow_html=True)
+    .styled-table { border-collapse: collapse; margin: 25px 0; font-size: 0.9em; font-family: sans-serif; min-width: 400px; box-shadow: 0 0 20px rgba(255, 255, 255, 0.1); color: #f0f0f0;}
+    .styled-table thead tr { background-color: #007bff; color: #ffffff; text-align: left; }
+    .styled-table th, .styled-table td { padding: 12px 15px; }
+    .styled-table tbody tr { border-bottom: 1px solid #3a3d46; }
+    .styled-table tbody tr:nth-of-type(even) { background-color: #2b2d31; }
+    .styled-table tbody tr:last-of-type { border-bottom: 2px solid #007bff; }
+</style>
+"""
+
+st.markdown(dark_theme_css if st.session_state.theme == "Dark" else light_theme_css, unsafe_allow_html=True)
+
 
 # --- App Header ---
 st.title("💊 Medicaid Drug Spending NLP Analytics")
@@ -169,7 +182,7 @@ def create_table_html(data: dict, chart_args: dict) -> str:
     
     return table_df.to_html(classes='styled-table', index=False)
 
-def create_chart_figure(data: dict, customization_prompt: str, chart_args: dict) -> go.Figure:
+def create_chart_figure(data: dict, customization_prompt: str, chart_args: dict, theme: str) -> go.Figure:
     """
     Uses an LLM to generate Plotly Python code for a chart based on data, a prompt, and original context.
     """
@@ -187,11 +200,11 @@ The data in the 'Value' column represents: '{y_axis_label}'.
 The data in the 'Entity' column represents: 'Product Name'.
 The data was generated by ranking the '{func_name}' based on the user's original request.
 """
-
     code_generation_prompt = f"""
 You are an expert Python data visualization assistant who specializes in the Plotly library.
 Your task is to write Python code to generate a chart based on a user's request and the provided data context.
 You will be given a pandas DataFrame named 'chart_df'. The DataFrame has two columns: 'Entity' and 'Value'.
+The user has selected the '{theme}' theme for the app.
 
 {data_context}
 
@@ -199,11 +212,11 @@ Your code MUST:
 1. Be a single, executable block of Python.
 2. Use the `plotly.graph_objects` library, imported as `go`, or `plotly.express` as `px`.
 3. Create a figure object named `fig`.
-4. Do NOT include any code to display the chart (e.g., `fig.show()`).
-5. Do NOT include the DataFrame creation code; assume `chart_df` already exists.
-6. Set a descriptive title and axis labels for the chart based on the user's request and the data context provided above.
-7. IMPORTANT: When adding annotations or text labels to bars, format the numbers as currency (e.g., '$1.2M', '$456.7k', '$789.00').
-8. IMPORTANT: Do NOT change the color scheme unless the user specifically asks for a color change (e.g., 'make it blue'). Preserve the default colorway if no color instruction is given.
+4. Set the chart's template to 'plotly_dark' if the theme is 'Dark', or 'plotly_white' if the theme is 'Light'.
+5. Do NOT include any code to display the chart (e.g., `fig.show()`).
+6. Do NOT include the DataFrame creation code; assume `chart_df` already exists.
+7. Set a descriptive title and axis labels for the chart based on the user's request and the data context provided above.
+8. IMPORTANT: When adding annotations or text labels to bars, format the numbers as currency (e.g., '$1.2M', '$456.7k', '$789.00').
 
 User's customization request: '{customization_prompt}'
 """
@@ -230,7 +243,6 @@ User's customization request: '{customization_prompt}'
         fig.update_layout(title_text=f"Chart Generation Error: {e}")
         return fig
 
-# --- Restored full list of functions for the AI ---
 functions = [
     {"name": "top_n", "description": "Get top N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
     {"name": "bottom_n", "description": "Get bottom N products by a single numeric column.", "parameters": {"type": "object", "properties": {"column": {"type": "string"}, "n": {"type": "integer"}}, "required": ["column", "n"]}},
@@ -241,7 +253,25 @@ functions = [
 st.subheader("📊 Sample of the dataset")
 st.dataframe(df.head(10), use_container_width=True)
 
-# --- FIX: Moved chat input to be defined before the display logic ---
+# --- DISPLAY LOGIC ---
+st.subheader("💬 Chat Interface")
+# --- FIX: Re-introduced a container for the chat history, but controlled by CSS for fluid height ---
+st.markdown('<div class="chat-history-container">', unsafe_allow_html=True)
+for i, msg in enumerate(st.session_state.get("chat_history", [])):
+    if msg["role"] == "user":
+        st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
+    
+    elif msg["role"] == "assistant":
+        if msg.get("figure"):
+            st.plotly_chart(msg["figure"], use_container_width=True, key=f"chart_{i}")
+        elif msg.get("table_html"):
+            st.markdown(msg["table_html"], unsafe_allow_html=True)
+        elif msg.get("content"):
+            if not msg["content"].startswith("[Chart generated") and not msg["content"].startswith("[Table generated"):
+                st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# --- FIX: Moved chat input to be defined after the display logic ---
 user_input = st.chat_input("Ask: 'Top 5 drugs by spending'")
 
 if user_input:
@@ -270,7 +300,7 @@ if user_input:
                         "role": "assistant", "content": f"[Table generated for '{user_input}']", "table_html": table_html, "chart_data": data, "chart_args": chart_args
                     })
                 else: 
-                    fig = create_chart_figure(data, user_input, chart_args)
+                    fig = create_chart_figure(data, user_input, chart_args, st.session_state.theme)
                     st.session_state.chat_history.append({
                         "role": "assistant", "content": f"[Chart generated for '{user_input}']", "figure": fig, "chart_data": data, "chart_args": chart_args
                     })
@@ -302,20 +332,5 @@ if user_input:
     
     st.rerun()
 
-# --- DISPLAY LOGIC ---
-st.subheader("💬 Chat Interface")
-# --- FIX: Removed the fixed-height container to make the layout fluid ---
-for i, msg in enumerate(st.session_state.chat_history):
-    if msg["role"] == "user":
-        st.markdown(f'<div class="message-wrapper user-wrapper"><div class="user-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
-    
-    elif msg["role"] == "assistant":
-        if msg.get("figure"):
-            st.plotly_chart(msg["figure"], use_container_width=True, key=f"chart_{i}")
-        elif msg.get("table_html"):
-            st.markdown(msg["table_html"], unsafe_allow_html=True)
-        elif msg.get("content"):
-            if not msg["content"].startswith("[Chart generated") and not msg["content"].startswith("[Table generated"):
-                st.markdown(f'<div class="message-wrapper assistant-wrapper"><div class="assistant-msg">{msg["content"]}</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
