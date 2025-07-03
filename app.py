@@ -19,11 +19,8 @@ st.markdown("""
     .main .block-container {
         padding-top: 0.2rem;
     }
-    /* Style for the main title */
-    h1 {
-        background-color: #eef2f9;
-        padding: 1rem;
-        border-radius: 10px;
+    /* --- FIX: Center align the subtitle --- */
+    h4 {
         text-align: center;
     }
     .message-wrapper { display: flex; width: 100%; margin: 5px 0; }
@@ -98,7 +95,6 @@ if "chat_history" not in st.session_state:
     outro = "\n\nUse your functions to answer questions. For charting, use `create_chart_figure`. For tables, use `create_table_html`. For vague follow-ups like 'tell me more' or 'something else', first ask for clarification (e.g., 'When you mention cost-efficiency, would you like to see the top drugs by cost per prescription?') before calling a function."
     system_prompt = intro + definitions_text + outro
     st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
-    # --- FIX: Initialize a flag for the initial load ---
     st.session_state.initial_load = True
 
 # --- Core Data & Charting Functions ---
@@ -259,7 +255,6 @@ with chat_container:
 user_input = st.chat_input("Ask: 'Top 5 drugs by spending'")
 
 if user_input:
-    # --- FIX: Set the initial_load flag to False after the first user interaction ---
     st.session_state.initial_load = False
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     
@@ -326,7 +321,6 @@ if user_input:
 
 st.markdown('<div class="credit">Created by Mohit Vaid</div>', unsafe_allow_html=True)
 
-# --- FIX: Only run the auto-scroll script after the first interaction ---
 if not st.session_state.get('initial_load', True):
     st.components.v1.html("""
         <script>
